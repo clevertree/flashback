@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 interface ClientInfo {
   ip: string
   port: number
+  peer_status?: string
 }
 
 interface ChatMessage {
@@ -333,9 +334,24 @@ export default function Home() {
                     <span className="text-gray-400 mx-2">:</span>
                     <span className="font-mono text-green-400">{client.port}</span>
                   </div>
-                  <div className="flex items-center">
-                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    <span className="text-sm text-gray-400">Online</span>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center">
+                      <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                      <span className="text-sm text-gray-400">Online</span>
+                    </div>
+                    <div className="flex items-center">
+                      {(() => {
+                        const s = (client as any).peer_status as string | undefined
+                        const label = s ? s : 'unknown'
+                        const color = s === 'connected' ? 'bg-green-500' : s === 'connecting' ? 'bg-yellow-500' : s === 'self' ? 'bg-blue-500' : 'bg-red-500'
+                        return (
+                          <>
+                            <span className={`w-2 h-2 ${color} rounded-full mr-2`}></span>
+                            <span className="text-sm text-gray-400">Direct: {label}</span>
+                          </>
+                        )
+                      })()}
+                    </div>
                   </div>
                 </div>
               ))}

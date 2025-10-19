@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start-server": "start-server.sh",
     "lint": "next lint",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:dev:auto": "./start-client.sh",
-    "tauri:build": "tauri build"
+    "tauri:dev:auto": "start-client.sh",
+    "tauri:build": "tauri build",
+    "build-icon": "npx tauri icon src-tauri/icons/icon.png"
   },
   "dependencies": {
     "next": "14.0.4",
