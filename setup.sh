@@ -162,9 +162,9 @@ echo "✅ Client dependencies installed"
 echo ""
 
 # Check if tauri-cli is installed
-if ! command -v cargo-tauri &> /dev/null; then
-    echo "📦 Installing Tauri CLI..."
-    cargo install tauri-cli
+if ! command -v tauri &> /dev/null && ! npx tauri --version &> /dev/null; then
+    echo "📦 Installing Tauri CLI via npm..."
+    npm install -g @tauri-apps/cli
     
     if [ $? -ne 0 ]; then
         echo "❌ Failed to install Tauri CLI"
@@ -191,7 +191,7 @@ echo "   cargo run"
 echo ""
 echo "2. Start the client (in another terminal):"
 echo "   cd client"
-echo "   npm run tauri:dev  # or: npm run build && npm start (static export)"
+echo "   npm run tauri:dev  # or: npx tauri dev"
 echo ""
 echo "You can start multiple client instances to see them"
 echo "all appear in the connected clients list!"
