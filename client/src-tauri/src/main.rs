@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -38,10 +38,7 @@ struct PeerConn {
 #[serde(tag = "type")]
 enum Message {
     #[serde(rename = "register")]
-    Register {
-        client_ip: String,
-        client_port: u16,
-    },
+    Register { client_ip: String, client_port: u16 },
     #[serde(rename = "client_list")]
     ClientList { clients: Vec<ClientInfo> },
     #[serde(rename = "ping")]
@@ -80,7 +77,10 @@ async fn connect_to_server(
     // Save self info
     {
         let mut self_lock = state.self_info.lock().unwrap();
-        *self_lock = Some(ClientInfo { ip: client_ip.clone(), port: client_port });
+        *self_lock = Some(ClientInfo {
+            ip: client_ip.clone(),
+            port: client_port,
+        });
     }
 
     // Start peer listener (accept incoming peer connections)
@@ -105,21 +105,40 @@ async fn connect_to_server(
                                         match reader.read_line(&mut line).await {
                                             Ok(0) => break,
                                             Ok(_) => {
-                                                if let Ok(msg) = serde_json::from_str::<Message>(&line) {
+                                                if let Ok(msg) =
+                                                    serde_json::from_str::<Message>(&line)
+                                                {
                                                     match msg {
                                                         Message::Ping => {
-                                                            let pong = serde_json::to_string(&Message::Pong).unwrap() + "\n";
-                                                            if let Err(e) = writer.write_all(pong.as_bytes()).await { println!("Peer write error: {}", e); break; }
-                                                            if let Err(e) = writer.flush().await { println!("Peer flush error: {}", e); break; }
+                                                            let pong = serde_json::to_string(
+                                                                &Message::Pong,
+                                                            )
+                                                            .unwrap()
+                                                                + "\n";
+                                                            if let Err(e) = writer
+                                                                .write_all(pong.as_bytes())
+                                                                .await
+                                                            {
+                                                                println!("Peer write error: {}", e);
+                                                                break;
+                                                            }
+                                                            if let Err(e) = writer.flush().await {
+                                                                println!("Peer flush error: {}", e);
+                                                                break;
+                                                            }
                                                         }
                                                         _ => {}
                                                     }
                                                 }
                                             }
-                                            Err(e) => { println!("Peer read error: {}", e); break; }
+                                            Err(e) => {
+                                                println!("Peer read error: {}", e);
+                                                break;
+                                            }
                                         }
                                     }
-                                    let _ = app_handle_incoming.emit_all("peer-incoming-closed", format!("{}", remote));
+                                    let _ = app_handle_incoming
+                                        .emit("peer-incoming-closed", format!("{}", remote));
                                 });
                             }
                             Err(e) => {
@@ -181,7 +200,7 @@ async fn connect_to_server(
             match reader.read_line(&mut line).await {
                 Ok(0) => {
                     println!("Server disconnected");
-                    let _ = app_handle_clone.emit_all("server-disconnected", ());
+                    let _ = app_handle_clone.emit("server-disconnected", ());
                     break;
                 }
                 Ok(_) => {
@@ -201,23 +220,28 @@ async fn connect_to_server(
                                 // Connect to peers (outbound) and update statuses
                                 for c in &clients {
                                     if let Some(ref me) = self_opt {
-                                        if me.ip == c.ip && me.port == c.port { continue; }
+                                        if me.ip == c.ip && me.port == c.port {
+                                            continue;
+                                        }
                                     }
                                     let key = format!("{}:{}", c.ip, c.port);
                                     let mut need_connect = false;
                                     {
                                         let mut peers = state_peers.lock().unwrap();
                                         match peers.get(&key) {
-                                            Some(pc) => {
-                                                match pc.status {
-                                                    PeerStatus::Disconnected => {
-                                                        need_connect = true;
-                                                    }
-                                                    PeerStatus::Connecting | PeerStatus::Connected => {}
+                                            Some(pc) => match pc.status {
+                                                PeerStatus::Disconnected => {
+                                                    need_connect = true;
                                                 }
-                                            }
+                                                PeerStatus::Connecting | PeerStatus::Connected => {}
+                                            },
                                             None => {
-                                                peers.insert(key.clone(), PeerConn { status: PeerStatus::Connecting });
+                                                peers.insert(
+                                                    key.clone(),
+                                                    PeerConn {
+                                                        status: PeerStatus::Connecting,
+                                                    },
+                                                );
                                                 need_connect = true;
                                             }
                                         }
@@ -235,46 +259,107 @@ async fn connect_to_server(
                                             println!("➡️ Connecting to peer {}", connect_target);
                                             match TcpStream::connect(&connect_target).await {
                                                 Ok(stream) => {
-                                                    println!("✅ Connected to peer {}", connect_target);
+                                                    println!(
+                                                        "✅ Connected to peer {}",
+                                                        connect_target
+                                                    );
                                                     {
-                                                    let mut peers = state_peers_clone.lock().unwrap();
-                                                    if let Some(pc) = peers.get_mut(&key_clone) { pc.status = PeerStatus::Connected; }
+                                                        let mut peers =
+                                                            state_peers_clone.lock().unwrap();
+                                                        if let Some(pc) = peers.get_mut(&key_clone)
+                                                        {
+                                                            pc.status = PeerStatus::Connected;
+                                                        }
                                                     }
-                                                    let _ = app_handle_pe.emit_all("peer-status-updated", &connect_target);
+                                                    let _ = app_handle_pe.emit(
+                                                        "peer-status-updated",
+                                                        &connect_target,
+                                                    );
                                                     // Also emit refreshed client list so UI updates direct status immediately
-                                                    emit_enriched_client_list(&app_handle_pe, &state_clients_clone, &state_peers_clone, &self_info_arc_clone);
+                                                    emit_enriched_client_list(
+                                                        &app_handle_pe,
+                                                        &state_clients_clone,
+                                                        &state_peers_clone,
+                                                        &self_info_arc_clone,
+                                                    );
                                                     // Split and spawn reader + heartbeat
                                                     let (reader, mut writer) = stream.into_split();
                                                     let mut reader = BufReader::new(reader);
                                                     // Heartbeat ticker
-                                                    let mut ping_interval = interval(Duration::from_secs(60));
+                                                    let mut ping_interval =
+                                                        interval(Duration::from_secs(60));
                                                     let ping_target = connect_target.clone();
                                                     tokio::spawn(async move {
                                                         loop {
-                                                            if ping_interval.tick().await.elapsed().is_zero() { /* noop */ }
-                                                            let ping = serde_json::to_string(&Message::Ping).unwrap() + "\n";
-                                                            if let Err(e) = writer.write_all(ping.as_bytes()).await { println!("Peer ping write error {}: {}", ping_target, e); break; }
-                                                            if let Err(e) = writer.flush().await { println!("Peer ping flush error {}: {}", ping_target, e); break; }
-                                                            println!("💓 Sent ping to peer {}", ping_target);
+                                                            if ping_interval
+                                                                .tick()
+                                                                .await
+                                                                .elapsed()
+                                                                .is_zero()
+                                                            { /* noop */
+                                                            }
+                                                            let ping = serde_json::to_string(
+                                                                &Message::Ping,
+                                                            )
+                                                            .unwrap()
+                                                                + "\n";
+                                                            if let Err(e) = writer
+                                                                .write_all(ping.as_bytes())
+                                                                .await
+                                                            {
+                                                                println!(
+                                                                    "Peer ping write error {}: {}",
+                                                                    ping_target, e
+                                                                );
+                                                                break;
+                                                            }
+                                                            if let Err(e) = writer.flush().await {
+                                                                println!(
+                                                                    "Peer ping flush error {}: {}",
+                                                                    ping_target, e
+                                                                );
+                                                                break;
+                                                            }
+                                                            println!(
+                                                                "💓 Sent ping to peer {}",
+                                                                ping_target
+                                                            );
                                                         }
                                                     });
                                                     // Reader loop: respond to pings and observe pongs
                                                     let reader_target = connect_target.clone();
-                                                    let state_peers_clone_reader = state_peers_clone.clone();
-                                                    let app_handle_pe_reader = app_handle_pe.clone();
+                                                    let state_peers_clone_reader =
+                                                        state_peers_clone.clone();
+                                                    let app_handle_pe_reader =
+                                                        app_handle_pe.clone();
                                                     let key_clone_reader = key_clone.clone();
-                                                    let state_clients_clone_reader = state_clients_clone.clone();
-                                                    let self_info_arc_clone_reader = self_info_arc_clone.clone();
+                                                    let state_clients_clone_reader =
+                                                        state_clients_clone.clone();
+                                                    let self_info_arc_clone_reader =
+                                                        self_info_arc_clone.clone();
                                                     tokio::spawn(async move {
                                                         let mut line = String::new();
                                                         loop {
                                                             line.clear();
-                                                            match reader.read_line(&mut line).await {
-                                                                Ok(0) => { println!("Peer {} closed", reader_target); break; }
+                                                            match reader.read_line(&mut line).await
+                                                            {
+                                                                Ok(0) => {
+                                                                    println!(
+                                                                        "Peer {} closed",
+                                                                        reader_target
+                                                                    );
+                                                                    break;
+                                                                }
                                                                 Ok(_) => {
-                                                                    if let Ok(msg) = serde_json::from_str::<Message>(&line) {
+                                                                    if let Ok(msg) =
+                                                                        serde_json::from_str::<
+                                                                            Message,
+                                                                        >(
+                                                                            &line
+                                                                        )
+                                                                    {
                                                                         match msg {
-                                                                            Message::Ping => { }
+                                                                            Message::Ping => {}
                                                                             Message::Pong => {
                                                                                 println!("💓 Received pong from peer {}", reader_target);
                                                                             }
@@ -282,24 +367,65 @@ async fn connect_to_server(
                                                                         }
                                                                     }
                                                                 }
-                                                                Err(e) => { println!("Peer {} read error: {}", reader_target, e); break; }
+                                                                Err(e) => {
+                                                                    println!(
+                                                                        "Peer {} read error: {}",
+                                                                        reader_target, e
+                                                                    );
+                                                                    break;
+                                                                }
                                                             }
                                                         }
                                                         // Mark disconnected
-                                                        let mut peers = state_peers_clone_reader.lock().unwrap();
-                                                        if let Some(pc) = peers.get_mut(&key_clone_reader) { pc.status = PeerStatus::Disconnected; }
-                                                        let _ = app_handle_pe_reader.emit_all("peer-status-updated", &reader_target);
+                                                        let mut peers = state_peers_clone_reader
+                                                            .lock()
+                                                            .unwrap();
+                                                        if let Some(pc) =
+                                                            peers.get_mut(&key_clone_reader)
+                                                        {
+                                                            pc.status = PeerStatus::Disconnected;
+                                                        }
+                                                        let _ = app_handle_pe_reader.emit(
+                                                            "peer-status-updated",
+                                                            &reader_target,
+                                                        );
                                                         // Also emit refreshed client list so UI updates direct status immediately
-                                                        emit_enriched_client_list(&app_handle_pe_reader, &state_clients_clone_reader, &state_peers_clone_reader, &self_info_arc_clone_reader);
+                                                        emit_enriched_client_list(
+                                                            &app_handle_pe_reader,
+                                                            &state_clients_clone_reader,
+                                                            &state_peers_clone_reader,
+                                                            &self_info_arc_clone_reader,
+                                                        );
                                                     });
                                                 }
                                                 Err(e) => {
-                                                    println!("❌ Failed to connect to peer {}: {}", connect_target, e);
-                                                    let mut peers = state_peers_clone.lock().unwrap();
-                                                    if let Some(pc) = peers.get_mut(&key_clone) { pc.status = PeerStatus::Disconnected; } else { peers.insert(key_clone, PeerConn { status: PeerStatus::Disconnected }); }
-                                                    let _ = app_handle_pe.emit_all("peer-status-updated", &connect_target);
+                                                    println!(
+                                                        "❌ Failed to connect to peer {}: {}",
+                                                        connect_target, e
+                                                    );
+                                                    let mut peers =
+                                                        state_peers_clone.lock().unwrap();
+                                                    if let Some(pc) = peers.get_mut(&key_clone) {
+                                                        pc.status = PeerStatus::Disconnected;
+                                                    } else {
+                                                        peers.insert(
+                                                            key_clone,
+                                                            PeerConn {
+                                                                status: PeerStatus::Disconnected,
+                                                            },
+                                                        );
+                                                    }
+                                                    let _ = app_handle_pe.emit(
+                                                        "peer-status-updated",
+                                                        &connect_target,
+                                                    );
                                                     // Also emit refreshed client list so UI updates direct status immediately
-                                                    emit_enriched_client_list(&app_handle_pe, &state_clients_clone, &state_peers_clone, &self_info_arc_clone);
+                                                    emit_enriched_client_list(
+                                                        &app_handle_pe,
+                                                        &state_clients_clone,
+                                                        &state_peers_clone,
+                                                        &self_info_arc_clone,
+                                                    );
                                                 }
                                             }
                                         });
@@ -307,32 +433,58 @@ async fn connect_to_server(
                                 }
 
                                 // Build enriched list with peer status for UI
-                                let enriched: Vec<EnrichedClientInfo> = clients.iter().map(|c| {
-                                    if let Some(ref me) = self_opt {
-                                        if me.ip == c.ip && me.port == c.port {
-                                            return EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "self".to_string() };
+                                let enriched: Vec<EnrichedClientInfo> = clients
+                                    .iter()
+                                    .map(|c| {
+                                        if let Some(ref me) = self_opt {
+                                            if me.ip == c.ip && me.port == c.port {
+                                                return EnrichedClientInfo {
+                                                    ip: c.ip.clone(),
+                                                    port: c.port,
+                                                    peer_status: "self".to_string(),
+                                                };
+                                            }
                                         }
-                                    }
-                                    let key = format!("{}:{}", c.ip, c.port);
-                                    let status_str = {
-                                        let peers = state_peers.lock().unwrap();
-                                        match peers.get(&key).map(|pc| pc.status.clone()) {
-                                            Some(PeerStatus::Connected) => "connected".to_string(),
-                                            Some(PeerStatus::Connecting) => "connecting".to_string(),
-                                            Some(PeerStatus::Disconnected) => "disconnected".to_string(),
-                                            None => "disconnected".to_string(),
+                                        let key = format!("{}:{}", c.ip, c.port);
+                                        let status_str = {
+                                            let peers = state_peers.lock().unwrap();
+                                            match peers.get(&key).map(|pc| pc.status.clone()) {
+                                                Some(PeerStatus::Connected) => {
+                                                    "connected".to_string()
+                                                }
+                                                Some(PeerStatus::Connecting) => {
+                                                    "connecting".to_string()
+                                                }
+                                                Some(PeerStatus::Disconnected) => {
+                                                    "disconnected".to_string()
+                                                }
+                                                None => "disconnected".to_string(),
+                                            }
+                                        };
+                                        EnrichedClientInfo {
+                                            ip: c.ip.clone(),
+                                            port: c.port,
+                                            peer_status: status_str,
                                         }
-                                    };
-                                    EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: status_str }
-                                }).collect();
+                                    })
+                                    .collect();
 
-                                let _ = app_handle_clone.emit_all("client-list-updated", enriched);
+                                let _ = app_handle_clone.emit("client-list-updated", enriched);
                             }
                             Message::Pong => {
                                 println!("💓 Received pong from server");
                             }
-                            Message::Chat { from_ip, from_port, message, timestamp, channel } => {
-                                println!("💬 Chat from {}:{} [{}]: {}", from_ip, from_port, channel, message);
+                            Message::Chat {
+                                from_ip,
+                                from_port,
+                                message,
+                                timestamp,
+                                channel,
+                            } => {
+                                println!(
+                                    "💬 Chat from {}:{} [{}]: {}",
+                                    from_ip, from_port, channel, message
+                                );
                                 let chat_data = serde_json::json!({
                                     "from_ip": from_ip,
                                     "from_port": from_port,
@@ -340,7 +492,7 @@ async fn connect_to_server(
                                     "timestamp": timestamp,
                                     "channel": channel,
                                 });
-                                let _ = app_handle_clone.emit_all("chat-message", chat_data);
+                                let _ = app_handle_clone.emit("chat-message", chat_data);
                             }
                             _ => {
                                 // Handle other message types if needed
@@ -350,7 +502,7 @@ async fn connect_to_server(
                 }
                 Err(e) => {
                     println!("Error reading from server: {}", e);
-                    let _ = app_handle_clone.emit_all("server-error", e.to_string());
+                    let _ = app_handle_clone.emit("server-error", e.to_string());
                     break;
                 }
             }
@@ -361,7 +513,7 @@ async fn connect_to_server(
     tokio::spawn(async move {
         // Send ping every 60 seconds (configurable, matching server config)
         let mut ping_interval = interval(Duration::from_secs(60));
-        
+
         loop {
             tokio::select! {
                 _ = ping_interval.tick() => {
@@ -422,7 +574,7 @@ async fn send_chat_message(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let tx = state.tx.lock().unwrap().clone();
-    
+
     if let Some(sender) = tx {
         let timestamp = chrono::Utc::now().to_rfc3339();
         let chat_msg = Message::Chat {
@@ -432,10 +584,12 @@ async fn send_chat_message(
             timestamp,
             channel,
         };
-        
-        sender.send(chat_msg).await
+
+        sender
+            .send(chat_msg)
+            .await
             .map_err(|e| format!("Failed to send chat message: {}", e))?;
-        
+
         Ok("Message sent".to_string())
     } else {
         Err("Not connected to server".to_string())
@@ -452,12 +606,16 @@ fn main() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(app_state)
-        .invoke_handler(tauri::generate_handler![connect_to_server, get_clients, send_chat_message])
+        .invoke_handler(tauri::generate_handler![
+            connect_to_server,
+            get_clients,
+            send_chat_message
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
 
 // Helper to emit the enriched client list using current peers map and self info
 fn emit_enriched_client_list(
@@ -478,7 +636,11 @@ fn emit_enriched_client_list(
         .map(|c| {
             if let Some(ref me) = self_opt {
                 if me.ip == c.ip && me.port == c.port {
-                    return EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "self".to_string() };
+                    return EnrichedClientInfo {
+                        ip: c.ip.clone(),
+                        port: c.port,
+                        peer_status: "self".to_string(),
+                    };
                 }
             }
             let key = format!("{}:{}", c.ip, c.port);
@@ -491,9 +653,13 @@ fn emit_enriched_client_list(
                     None => "disconnected".to_string(),
                 }
             };
-            EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: status_str }
+            EnrichedClientInfo {
+                ip: c.ip.clone(),
+                port: c.port,
+                peer_status: status_str,
+            }
         })
         .collect();
 
-    let _ = app_handle.emit_all("client-list-updated", enriched);
+    let _ = app_handle.emit("client-list-updated", enriched);
 }

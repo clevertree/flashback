@@ -1,5 +1,5 @@
-# Use the official Rust image as the build environment
-FROM rust:1.75-slim as builder
+# Use the official Rust image as the build environment (updated to support Cargo.lock v4)
+FROM rust:1.90-slim as builder
 
 # Install necessary dependencies for building
 RUN apt-get update && apt-get install -y \
@@ -17,20 +17,21 @@ COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies only (this layer will be cached)
-RUN cargo build --release && rm -rf src
+RUN cargo build --release --locked && rm -rf src
 
 # Copy the actual source code
 COPY src ./src
 
 # Build the application
-RUN cargo build --release
+RUN cargo build --release --locked
 
 # Runtime stage - use a minimal base image
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
+# Install runtime dependencies (include netcat for docker-compose healthcheck)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user

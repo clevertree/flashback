@@ -1,6 +1,6 @@
 # Multi-stage build for the client
 # Stage 1: Build the Next.js application
-FROM node:18-alpine as nextjs-builder
+FROM node:18-alpine AS nextjs-builder
 
 WORKDIR /app
 
@@ -8,25 +8,29 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install
 
 # Copy source code
 COPY src ./src
+COPY public ./public
 COPY next.config.js ./
 COPY tsconfig.json ./
 COPY postcss.config.js ./
 COPY tailwind.config.js ./
 
-# Build the Next.js application
+# Build the Next.js application (output: export -> generates /app/out)
 RUN npm run build
 
-# Stage 2: Create the runtime image with Node.js server
+# Stage 2: Serve the static export with a lightweight image
 FROM node:18-alpine
 
 # Install necessary system dependencies
 RUN apk add --no-cache \
     ca-certificates \
     dumb-init
+
+# Install a simple static file server
+RUN npm i -g serve
 
 # Create a non-root user
 RUN addgroup -g 1001 -S nodejs
@@ -35,16 +39,8 @@ RUN adduser -S nextjs -u 1001
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=nextjs-builder --chown=nextjs:nodejs /app/.next ./.next
-COPY --from=nextjs-builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=nextjs-builder --chown=nextjs:nodejs /app/next.config.js ./
+# Copy exported site from builder stage
+COPY --from=nextjs-builder --chown=nextjs:nodejs /app/out ./out
 
 # Switch to non-root user
 USER nextjs
@@ -61,5 +57,5 @@ ENV HOSTNAME="0.0.0.0"
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start the Next.js server
-CMD ["npm", "start"]
+# Start the static server
+CMD ["serve", "-s", "out", "-l", "3000"]
