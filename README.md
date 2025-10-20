@@ -1,6 +1,6 @@
 # Client-Server Application with Tauri and Next.js
 
-A distributed client-server application where clients connect to a central server and can view all connected clients.
+  A distributed client-server application where clients connect to a central server and can view all connected clients.
 
 ## Architecture
 

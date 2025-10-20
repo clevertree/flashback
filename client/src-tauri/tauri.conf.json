@@ -23,7 +23,7 @@
       "targets": "all",
       "identifier": "com.clientserver.app",
       "icon": [
-        "icons/icon.png"
+        "icons/icon.ico"
       ]
     },
     "security": {
