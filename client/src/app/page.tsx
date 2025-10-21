@@ -1,25 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import NavMenu from '../components/NavMenu'
-import ThemeSwitcher from '../components/ThemeSwitcher'
-import { getConfig, setConfig, type NavSide, type ThemeType, type MainTab } from '../config'
-
-interface ClientInfo {
-  ip: string
-  port: number
-  peer_status?: string
-}
-
-interface ChatMessage {
-  from_ip: string
-  from_port: number
-  message: string
-  timestamp: string
-  channel: string
-}
+import { getConfig, setConfig, type NavSide } from '../config'
+import ConnectionForm from '../components/ConnectionForm'
+import ChatSection, { type ChatMessage } from '../components/ChatSection'
+import ClientsList, { type ClientInfo } from '../components/ClientsList'
+import InstructionsSection from '../components/InstructionsSection'
+import SettingsSection from '../components/SettingsSection'
+import DccChatroom from '../components/DccChatroom'
+import VideoPlayerSection from '../components/VideoPlayerSection'
 
 export default function Home() {
   const [serverIp, setServerIp] = useState('127.0.0.1')
@@ -35,64 +27,57 @@ export default function Home() {
   const [currentChannel, setCurrentChannel] = useState('general')
   const [availableChannels, setAvailableChannels] = useState<string[]>(['general'])
   const [newChannelInput, setNewChannelInput] = useState('')
-  const [theme, setTheme] = useState<ThemeType>(getConfig().theme)
   const [navSide, setNavSide] = useState<NavSide>(getConfig().navSide)
-  const [activeTab, setActiveTab] = useState<MainTab>(getConfig().activeTab || 'Connection')
+  const [autoPlayMedia, setAutoPlayMedia] = useState<boolean>(getConfig().autoPlayMedia)
+  const [dccPeer, setDccPeer] = useState<{ ip: string; port: number } | null>(null)
 
   useEffect(() => {
-    // Generate random client port
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
     setClientPort(randomPort.toString())
 
-    // Listen for client list updates
     const unlisten = listen<ClientInfo[]>('client-list-updated', (event) => {
-      console.log('Client list updated:', event.payload)
       setClients(event.payload)
     })
 
-    // Listen for server disconnection
     const unlistenDisconnect = listen('server-disconnected', () => {
       setConnected(false)
       setStatus('Disconnected from server')
       setError('Server disconnected')
     })
 
-    // Listen for server errors
     const unlistenError = listen<string>('server-error', (event) => {
       setError(`Server error: ${event.payload}`)
     })
 
-    // Listen for chat messages
     const unlistenChat = listen<ChatMessage>('chat-message', (event) => {
-      console.log('Chat message received:', event.payload)
-      setChatMessages(prev => [...prev, event.payload])
+      setChatMessages((prev) => [...prev, event.payload])
     })
 
     return () => {
-      unlisten.then(f => f())
-      unlistenDisconnect.then(f => f())
-      unlistenError.then(f => f())
-      unlistenChat.then(f => f())
+      unlisten.then((f) => f())
+      unlistenDisconnect.then((f) => f())
+      unlistenError.then((f) => f())
+      unlistenChat.then((f) => f())
     }
   }, [])
 
   // Persist UI preferences
   useEffect(() => {
-    setConfig({ theme, navSide, activeTab })
-  }, [theme, navSide, activeTab])
+    setConfig({ navSide, autoPlayMedia })
+  }, [navSide, autoPlayMedia])
 
   const handleConnect = async () => {
     try {
       setError('')
       setStatus('Connecting...')
-      
+
       const result = await invoke<string>('connect_to_server', {
         serverIp,
         serverPort: parseInt(serverPort),
         clientIp,
         clientPort: parseInt(clientPort),
       })
-      
+
       setConnected(true)
       setStatus(result)
     } catch (err) {
@@ -120,12 +105,10 @@ export default function Home() {
 
   const handleAddChannel = () => {
     if (!newChannelInput.trim() || availableChannels.includes(newChannelInput)) return
-    setAvailableChannels(prev => [...prev, newChannelInput])
+    setAvailableChannels((prev) => [...prev, newChannelInput])
     setCurrentChannel(newChannelInput)
     setNewChannelInput('')
   }
-
-  const filteredMessages = chatMessages.filter(msg => msg.channel === currentChannel)
 
   const formatTimestamp = (timestamp: string) => {
     try {
@@ -135,299 +118,89 @@ export default function Home() {
     }
   }
 
+  const scrollTo = useCallback((id: string) => {
+    if (typeof window === 'undefined') return
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
   return (
     <>
       <NavMenu
         side={navSide}
         items={[
-          { label: 'Connection', onClick: () => setActiveTab('Connection') },
-          { label: 'Chat', onClick: () => setActiveTab('Chat') },
-          { label: 'Clients', onClick: () => setActiveTab('Clients') },
-          { label: 'Instructions', onClick: () => setActiveTab('Instructions') },
+          { label: 'Connection', onClick: () => scrollTo('connection') },
+          { label: 'Chat', onClick: () => scrollTo('chat') },
+          { label: 'Clients', onClick: () => scrollTo('clients') },
+          { label: 'Video', onClick: () => scrollTo('video') },
+          { label: 'Settings', onClick: () => scrollTo('settings') },
+          { label: 'Instructions', onClick: () => scrollTo('instructions') },
         ]}
       />
       <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white transition-all duration-300 ${navSide === 'left' ? 'ml-56' : 'mr-56'}`}>
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold">Client-Server Connection</h1>
-            <div className="flex items-center gap-2">
-              <ThemeSwitcher theme={theme} onChange={setTheme} />
-              <button
-                onClick={() => setNavSide(navSide === 'left' ? 'right' : 'left')}
-                className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                title="Move Navigation"
-              >
-                Move Nav {navSide === 'left' ? '→' : '←'}
-              </button>
-            </div>
+            <h1 className="text-3xl font-bold">Junie IRC Client</h1>
           </div>
 
-          {theme === 'tabbed' && (
-            <div className="mb-6 border-b border-gray-700" role="tablist" aria-label="Sections">
-              {(['Connection', 'Chat', 'Clients', 'Instructions'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  role="tab"
-                  aria-selected={activeTab === tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`mr-2 px-3 py-2 text-sm rounded-t focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                    activeTab === tab ? 'bg-gray-800 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          )}
+          <VideoPlayerSection autoPlay={autoPlayMedia} />
 
-        {/* Connection Form */}
-        {(theme === 'stacked' || activeTab === 'Connection') && (
-        <div className="bg-gray-800 rounded-lg p-6 mb-8 shadow-lg">
-          <h2 className="text-2xl font-semibold mb-4">Connection Settings</h2>
-          
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Server IP Address
-              </label>
-              <input
-                type="text"
-                value={serverIp}
-                onChange={(e) => setServerIp(e.target.value)}
-                disabled={connected}
-                className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                placeholder="127.0.0.1"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Server Port
-              </label>
-              <input
-                type="text"
-                value={serverPort}
-                onChange={(e) => setServerPort(e.target.value)}
-                disabled={connected}
-                className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                placeholder="8080"
-              />
-            </div>
-          </div>
+          <ConnectionForm
+            serverIp={serverIp}
+            serverPort={serverPort}
+            clientIp={clientIp}
+            clientPort={clientPort}
+            connected={connected}
+            status={status}
+            error={error}
+            setServerIp={setServerIp}
+            setServerPort={setServerPort}
+            setClientIp={setClientIp}
+            setClientPort={setClientPort}
+            onConnect={handleConnect}
+          />
 
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Your IP Address
-              </label>
-              <input
-                type="text"
-                value={clientIp}
-                onChange={(e) => setClientIp(e.target.value)}
-                disabled={connected}
-                className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                placeholder="127.0.0.1"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Your Port
-              </label>
-              <input
-                type="text"
-                value={clientPort}
-                onChange={(e) => setClientPort(e.target.value)}
-                disabled={connected}
-                className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                placeholder="Random port"
-              />
-            </div>
-          </div>
+          <ChatSection
+            id="chat"
+            connected={connected}
+            clientIp={clientIp}
+            clientPort={parseInt(clientPort || '0')}
+            availableChannels={availableChannels}
+            currentChannel={currentChannel}
+            newChannelInput={newChannelInput}
+            chatMessages={chatMessages}
+            messageInput={messageInput}
+            setCurrentChannel={setCurrentChannel}
+            setNewChannelInput={setNewChannelInput}
+            setMessageInput={setMessageInput}
+            onAddChannel={handleAddChannel}
+            onSend={handleSendMessage}
+            formatTimestamp={formatTimestamp}
+          />
 
-          <button
-            onClick={handleConnect}
-            disabled={connected}
-            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-semibold transition-colors"
-          >
-            {connected ? 'Connected' : 'Connect to Server'}
-          </button>
+          <ClientsList
+            clients={clients}
+            selfIp={clientIp}
+            selfPort={parseInt(clientPort || '0')}
+            onDccConnect={(peer) => {
+              setDccPeer(peer)
+              // Requirement: When a user hits 'connect' with another user, instantly open a new chatroom
+              scrollTo('dcc')
+            }}
+          />
 
-          {status && (
-            <div className={`mt-4 p-3 rounded ${connected ? 'bg-green-900/50 text-green-200' : 'bg-yellow-900/50 text-yellow-200'}`}>
-              {status}
-            </div>
-          )}
+          <DccChatroom peer={dccPeer} onClose={() => setDccPeer(null)} />
 
-          {error && (
-            <div className="mt-4 p-3 rounded bg-red-900/50 text-red-200">
-              {error}
-            </div>
-          )}
+          <SettingsSection
+            navSide={navSide}
+            autoPlayMedia={autoPlayMedia}
+            onChangeNavSide={(side) => setNavSide(side)}
+            onToggleAutoPlay={setAutoPlayMedia}
+          />
+
+          <InstructionsSection />
         </div>
-        )}
-
-        {/* Chat Section */}
-        {(theme === 'stacked' || activeTab === 'Chat') && connected && (
-          <div className="bg-gray-800 rounded-lg p-6 shadow-lg mb-8">
-            <h2 className="text-2xl font-semibold mb-4">
-              💬 Group Chat
-            </h2>
-            
-            {/* Channel Management */}
-            <div className="mb-4 space-y-3">
-              <div className="flex gap-2">
-                <select
-                  value={currentChannel}
-                  onChange={(e) => setCurrentChannel(e.target.value)}
-                  className="flex-1 px-4 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
-                >
-                  {availableChannels.map(channel => (
-                    <option key={channel} value={channel}>
-                      #{channel}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newChannelInput}
-                  onChange={(e) => setNewChannelInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddChannel()}
-                  placeholder="Create new channel..."
-                  className="flex-1 px-4 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                />
-                <button
-                  onClick={handleAddChannel}
-                  disabled={!newChannelInput.trim()}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded text-sm font-semibold transition-colors"
-                >
-                  Add Channel
-                </button>
-              </div>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto mb-4 space-y-2">
-              {filteredMessages.length === 0 ? (
-                <p className="text-gray-400 text-center py-8">
-                  No messages in #{currentChannel} yet. Send a message to start chatting!
-                </p>
-              ) : (
-                filteredMessages.map((msg, index) => {
-                  const isOwnMessage = msg.from_ip === clientIp && msg.from_port === parseInt(clientPort)
-                  return (
-                    <div
-                      key={index}
-                      className={`p-3 rounded ${
-                        isOwnMessage 
-                          ? 'bg-blue-900/50 ml-8' 
-                          : 'bg-gray-700 mr-8'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-semibold">
-                          {isOwnMessage ? 'You' : `${msg.from_ip}:${msg.from_port}`}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {formatTimestamp(msg.timestamp)}
-                        </span>
-                      </div>
-                      <p className="text-gray-100">{msg.message}</p>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-
-            {/* Message Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder={`Message #${currentChannel}...`}
-                className="flex-1 px-4 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={!messageInput.trim()}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-semibold transition-colors"
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Connected Clients List */}
-        {(theme === 'stacked' || activeTab === 'Clients') && (
-        <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
-          <h2 className="text-2xl font-semibold mb-4">
-            Connected Clients ({clients.length})
-          </h2>
-          
-          {clients.length === 0 ? (
-            <p className="text-gray-400 text-center py-8">
-              No clients connected yet. Connect to see other clients.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {clients.map((client, index) => (
-                <div
-                  key={index}
-                  className="bg-gray-700 p-4 rounded flex items-center justify-between hover:bg-gray-650 transition-colors"
-                >
-                  <div>
-                    <span className="font-mono text-blue-400">{client.ip}</span>
-                    <span className="text-gray-400 mx-2">:</span>
-                    <span className="font-mono text-green-400">{client.port}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center">
-                      <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                      <span className="text-sm text-gray-400">Online</span>
-                    </div>
-                    <div className="flex items-center">
-                      {(() => {
-                        const s = (client as any).peer_status as string | undefined
-                        const label = s ? s : 'unknown'
-                        const color = s === 'connected' ? 'bg-green-500' : s === 'connecting' ? 'bg-yellow-500' : s === 'self' ? 'bg-blue-500' : 'bg-red-500'
-                        return (
-                          <>
-                            <span className={`w-2 h-2 ${color} rounded-full mr-2`}></span>
-                            <span className="text-sm text-gray-400">Direct: {label}</span>
-                          </>
-                        )
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* Instructions */}
-        {(theme === 'stacked' || activeTab === 'Instructions') && (
-        <div className="mt-8 bg-gray-800/50 rounded-lg p-6 border border-gray-700">
-          <h3 className="text-lg font-semibold mb-2">Instructions</h3>
-          <ol className="list-decimal list-inside space-y-1 text-sm text-gray-300">
-            <li>Make sure the server is running (cargo run in the server directory)</li>
-            <li>Enter the server IP and port (default: 127.0.0.1:8080)</li>
-            <li>Your client IP and port will be auto-generated</li>
-            <li>Click "Connect to Server" to join</li>
-            <li>Open multiple client instances to chat with each other</li>
-            <li>Messages are broadcast to all connected clients (not stored on server)</li>
-          </ol>
-        </div>
-        )}
-      </div>
-    </main>
+      </main>
     </>
   )
 }

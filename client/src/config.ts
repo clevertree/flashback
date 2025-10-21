@@ -1,18 +1,15 @@
-export type ThemeType = 'stacked' | 'tabbed'
 export type NavSide = 'left' | 'right'
-export type MainTab = 'Connection' | 'Chat' | 'Clients' | 'Instructions'
 
 export interface AppConfig {
   navSide: NavSide
-  theme: ThemeType
-  activeTab?: MainTab
+  // Future settings placeholders
+  autoPlayMedia: boolean
 }
 
-// Simple runtime config with defaults; can be extended to read from localStorage or a JSON file.
+// Runtime config with defaults; backward compatible with older stored keys.
 const defaultConfig: AppConfig = {
   navSide: 'left',
-  theme: 'stacked',
-  activeTab: 'Connection',
+  autoPlayMedia: true,
 }
 
 export function getConfig(): AppConfig {
@@ -21,7 +18,9 @@ export function getConfig(): AppConfig {
       const stored = window.localStorage.getItem('flashback.config')
       if (stored) {
         const parsed = JSON.parse(stored)
-        return { ...defaultConfig, ...parsed }
+        // drop legacy keys: theme, activeTab if present
+        const { theme: _legacyTheme, activeTab: _legacyActive, ...rest } = parsed || {}
+        return { ...defaultConfig, ...rest }
       }
     } catch (e) {
       // ignore parse errors and fall back to defaults

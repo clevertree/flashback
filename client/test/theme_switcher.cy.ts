@@ -1,21 +1,18 @@
-describe('Theme Switcher', () => {
-  it('switches between stacked and tabbed', () => {
+describe('Settings Section', () => {
+  it('allows changing nav side and toggling media auto-play', () => {
     cy.visit('/')
 
-    // Initially Stacked: no tab bar visible (we added tabs only when tabbed)
-    cy.contains('button', 'Connection').should('not.exist')
+    // Navigate to Settings
+    cy.contains('button', 'Settings').click()
 
-    // Switch to Tabbed
-    cy.contains('button', 'Tabbed').click()
+    // Toggle nav side
+    cy.get('main').should('have.class', 'ml-56')
+    cy.contains('button', 'RIGHT').click()
+    cy.get('main').should('have.class', 'mr-56')
 
-    // Tab bar should appear
-    cy.contains('button', 'Connection').should('exist')
-    cy.contains('button', 'Chat').should('exist')
-    cy.contains('button', 'Clients').should('exist')
-    cy.contains('button', 'Instructions').should('exist')
-
-    // Switch back to Stacked
-    cy.contains('button', 'Stacked').click()
-    cy.contains('button', 'Connection').should('not.exist')
+    // Toggle media autoplay checkbox
+    cy.get('#settings').within(() => {
+      cy.get('input[type="checkbox"]').first().click({ force: true })
+    })
   })
 })

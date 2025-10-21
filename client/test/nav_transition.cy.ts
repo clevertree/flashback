@@ -1,5 +1,5 @@
 describe('Nav transitions', () => {
-  it('has transition classes and animates side change', () => {
+  it('has transition classes and side can be changed in Settings', () => {
     cy.visit('/')
 
     // Nav aside should have transition-transform class
@@ -9,8 +9,9 @@ describe('Nav transitions', () => {
     cy.get('main').should('have.class', 'transition-all')
       .and('have.class', 'ml-56')
 
-    // Toggle side; main should switch to right margin
-    cy.contains('button', 'Move Nav').click()
+    // Open Settings and switch to RIGHT side
+    cy.contains('button', 'Settings').click()
+    cy.contains('button', 'RIGHT').click()
     cy.get('main').should('have.class', 'mr-56')
   })
 })
