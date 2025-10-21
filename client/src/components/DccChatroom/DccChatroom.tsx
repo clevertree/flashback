@@ -118,37 +118,48 @@ export default function DccChatroom({
         // Do not set incomingFile here to avoid showing receiver UI on sender
     }
 
+    const isTauri = typeof window !== 'undefined' && (('__TAURI_INTERNALS__' in window) || (window as any).__TAURI__)
+
     async function handleOpenWithOS(url: string) {
-        // Prefer Tauri shell.open for OS default handler; fallback to window.open
+        // Use Tauri shell plugin in desktop builds; avoid browser fallback when Tauri is present
+        const tauriDetected = isTauri
         try {
-            // Dynamic import to avoid breaking web builds if plugin not present
-            const mod = await import('@tauri-apps/plugin-shell')
-            if (mod && typeof mod.open === 'function') {
-                await mod.open(url)
+            const shell = await import('@tauri-apps/plugin-shell')
+            if (shell && typeof shell.open === 'function') {
+                await shell.open(url)
                 log('Opened file with OS default handler.')
                 return
             }
-        } catch (_) {
-            // ignore and fallback
+            throw new Error('tauri plugin-shell open() not available')
+        } catch (e) {
+            if (tauriDetected) {
+                log(`Failed to open with OS via Tauri: ${e}`)
+                return
+            }
+            // Browser-only dev fallback (non-Tauri)
+            try {
+                window.open(url, '_blank', 'noopener,noreferrer')
+                log('Opened file in browser (web mode).')
+            } catch (e2) {
+                log(`Failed to open file in browser: ${e2}`)
+            }
         }
-        window.open(url, '_blank')
-        log('Opened file with OS default handler (browser context).')
     }
 
     async function handleSaveToOS(url: string, name: string) {
-        // Use Tauri dialog + fs when available; fallback to browser download
+        // Use Tauri dialog + fs; only fall back to browser when NOT running under Tauri
+        const tauriDetected = isTauri
         try {
-            const [{ save }, { writeFile }] = await Promise.all([
+            const [{ save }, fs] = await Promise.all([
                 import('@tauri-apps/plugin-dialog'),
                 import('@tauri-apps/plugin-fs'),
             ])
             const suggested = name || 'download.bin'
             const targetPath = await save({ defaultPath: suggested })
             if (targetPath) {
-                // Fetch bytes from url/blob
                 const resp = await fetch(url)
                 const buf = await resp.arrayBuffer()
-                await writeFile(targetPath, new Uint8Array(buf))
+                await fs.writeFile(targetPath, new Uint8Array(buf))
                 log(`Saved file to: ${targetPath}`)
                 return
             } else {
@@ -156,16 +167,24 @@ export default function DccChatroom({
                 return
             }
         } catch (e) {
-            // Fall back to browser download if Tauri APIs unavailable or failed
-            console.warn('Tauri save failed or unavailable, falling back to browser download:', e)
+            if (tauriDetected) {
+                log(`Failed to save via Tauri FS/Dialog: ${e}`)
+                return
+            }
+            // Web fallback (non-Tauri)
+            try {
+                const a = document.createElement('a')
+                a.href = url
+                a.download = name
+                document.body.appendChild(a)
+                a.click()
+                a.remove()
+                log('Saved file via browser download (web mode).')
+                return
+            } catch (e2) {
+                log(`Failed browser download: ${e2}`)
+            }
         }
-        const a = document.createElement('a')
-        a.href = url
-        a.download = name
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        log('Saved file via browser download.')
     }
 
     function handlePlayback(url: string) {
