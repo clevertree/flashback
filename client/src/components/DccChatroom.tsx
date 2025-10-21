@@ -55,9 +55,11 @@ export default function DccChatroom({ peer, onClose, onSendFile, onPlayback }: D
   function onFileChosen(file: File) {
     log(`Selected file: ${file.name} (${file.size} bytes)`)
     onSendFile?.(file)
-    // In a real app, this would signal the receiver. For demo, also create an incoming offer locally.
+    // Sender should NOT see receiver options; simulate sending an offer to the peer only.
+    // In a full implementation, this would signal the remote client.
     const url = URL.createObjectURL(file)
-    setIncomingFile({ name: file.name, url })
+    log(`Sent file offer to ${peerLabel}`)
+    // Do not set incomingFile here to avoid showing receiver UI on sender
   }
 
   function handleOpenWithOS(url: string) {

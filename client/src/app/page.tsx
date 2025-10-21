@@ -110,6 +110,14 @@ export default function Home() {
 
       setConnected(true)
       setStatus(result)
+
+      // Fetch initial client list as a fallback to ensure UI sync
+      try {
+        const initial = await invoke<any>('get_clients')
+        if (Array.isArray(initial)) {
+          setClients(initial as any)
+        }
+      } catch {}
     } catch (err) {
       setError(err as string)
       setStatus('Connection failed')

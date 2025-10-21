@@ -290,7 +290,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                     }
 
                     // Broadcast updated client list to all clients
-                    broadcast_client_list(&clients).await;
+                    broadcast_client_list(&clients, &writers).await;
 
                     // Send initial client list to this client
                     if let Err(e) = send_client_list(&writer, &clients).await {
@@ -384,7 +384,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
     }
 
     // Broadcast updated client list
-    broadcast_client_list(&clients).await;
+    broadcast_client_list(&clients, &writers).await;
 }
 
 async fn send_client_list(
@@ -406,15 +406,13 @@ async fn send_client_list(
     Ok(())
 }
 
-async fn broadcast_client_list(clients: &ClientMap) {
+async fn broadcast_client_list(clients: &ClientMap, writers: &WriterMap) {
     let clients_lock = clients.read().await;
     let client_list: Vec<ClientInfo> = clients_lock.values().cloned().collect();
 
-    let message = Message::ClientList {
-        clients: client_list.clone(),
-    };
+    let message = Message::ClientList { clients: client_list.clone() };
 
-    let _json = match serde_json::to_string(&message) {
+    let json = match serde_json::to_string(&message) {
         Ok(j) => j + "\n",
         Err(e) => {
             println!("❌ Error serializing client list: {}", e);
@@ -427,8 +425,24 @@ async fn broadcast_client_list(clients: &ClientMap) {
         client_list.len()
     );
 
-    // We would need to maintain write handles to broadcast
-    // For simplicity, clients will poll or we send on next message
+    let writers_lock = writers.read().await;
+    let mut failed_addrs = Vec::new();
+    for (addr, writer) in writers_lock.iter() {
+        let mut writer_lock = writer.lock().await;
+        if let Err(e) = writer_lock.write_all(json.as_bytes()).await {
+            println!("❌ Failed to send client list to {}: {}", addr, e);
+            failed_addrs.push(*addr);
+            continue;
+        }
+        if let Err(e) = writer_lock.flush().await {
+            println!("❌ Failed to flush client list to {}: {}", addr, e);
+            failed_addrs.push(*addr);
+        }
+    }
+
+    if !failed_addrs.is_empty() {
+        println!("⚠️  Failed to broadcast client list to {} clients", failed_addrs.len());
+    }
 }
 
 async fn broadcast_message(writers: &WriterMap, message: &Message, exclude: Option<SocketAddr>) {
