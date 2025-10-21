@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import NavMenu from '../components/NavMenu'
+import ThemeSwitcher from '../components/ThemeSwitcher'
+import { getConfig, setConfig, type NavSide, type ThemeType } from '../config'
 
 interface ClientInfo {
   ip: string
@@ -32,6 +35,9 @@ export default function Home() {
   const [currentChannel, setCurrentChannel] = useState('general')
   const [availableChannels, setAvailableChannels] = useState<string[]>(['general'])
   const [newChannelInput, setNewChannelInput] = useState('')
+  const [theme, setTheme] = useState<ThemeType>(getConfig().theme)
+  const [navSide, setNavSide] = useState<NavSide>(getConfig().navSide)
+  const [activeTab, setActiveTab] = useState<'Connection' | 'Chat' | 'Clients' | 'Instructions'>('Connection')
 
   useEffect(() => {
     // Generate random client port
@@ -69,6 +75,11 @@ export default function Home() {
       unlistenChat.then(f => f())
     }
   }, [])
+
+  // Persist UI preferences
+  useEffect(() => {
+    setConfig({ theme, navSide })
+  }, [theme, navSide])
 
   const handleConnect = async () => {
     try {
@@ -125,13 +136,50 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8 text-center">
-          Client-Server Connection
-        </h1>
+    <>
+      <NavMenu
+        side={navSide}
+        items={[
+          { label: 'Connection', onClick: () => setActiveTab('Connection') },
+          { label: 'Chat', onClick: () => setActiveTab('Chat') },
+          { label: 'Clients', onClick: () => setActiveTab('Clients') },
+          { label: 'Instructions', onClick: () => setActiveTab('Instructions') },
+        ]}
+      />
+      <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white ${navSide === 'left' ? 'ml-56' : 'mr-56'}`}>
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-3xl font-bold">Client-Server Connection</h1>
+            <div className="flex items-center gap-2">
+              <ThemeSwitcher theme={theme} onChange={setTheme} />
+              <button
+                onClick={() => setNavSide(navSide === 'left' ? 'right' : 'left')}
+                className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded"
+                title="Move Navigation"
+              >
+                Move Nav {navSide === 'left' ? '→' : '←'}
+              </button>
+            </div>
+          </div>
+
+          {theme === 'tabbed' && (
+            <div className="mb-6 border-b border-gray-700">
+              {(['Connection', 'Chat', 'Clients', 'Instructions'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`mr-2 px-3 py-2 text-sm rounded-t ${
+                    activeTab === tab ? 'bg-gray-800 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          )}
 
         {/* Connection Form */}
+        {(theme === 'stacked' || activeTab === 'Connection') && (
         <div className="bg-gray-800 rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-semibold mb-4">Connection Settings</h2>
           
@@ -215,9 +263,10 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
 
         {/* Chat Section */}
-        {connected && (
+        {(theme === 'stacked' || activeTab === 'Chat') && connected && (
           <div className="bg-gray-800 rounded-lg p-6 shadow-lg mb-8">
             <h2 className="text-2xl font-semibold mb-4">
               💬 Group Chat
@@ -313,6 +362,7 @@ export default function Home() {
         )}
 
         {/* Connected Clients List */}
+        {(theme === 'stacked' || activeTab === 'Clients') && (
         <div className="bg-gray-800 rounded-lg p-6 shadow-lg">
           <h2 className="text-2xl font-semibold mb-4">
             Connected Clients ({clients.length})
@@ -358,8 +408,10 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
 
         {/* Instructions */}
+        {(theme === 'stacked' || activeTab === 'Instructions') && (
         <div className="mt-8 bg-gray-800/50 rounded-lg p-6 border border-gray-700">
           <h3 className="text-lg font-semibold mb-2">Instructions</h3>
           <ol className="list-decimal list-inside space-y-1 text-sm text-gray-300">
@@ -371,7 +423,9 @@ export default function Home() {
             <li>Messages are broadcast to all connected clients (not stored on server)</li>
           </ol>
         </div>
+        )}
       </div>
     </main>
+    </>
   )
 }
