@@ -1,6 +1,6 @@
 "use client"
 import React from 'react'
-import type { NavSide } from '../config'
+import type { NavSide } from '../../config'
 
 export interface SettingsSectionProps {
   navSide: NavSide

@@ -3,15 +3,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import NavMenu from '../components/NavMenu'
+import NavMenu from '../components/NavMenu/index'
 import { getConfig, setConfig, type NavSide, peerKey } from '../config'
-import ConnectionForm from '../components/ConnectionForm'
-import ChatSection, { type ChatMessage } from '../components/ChatSection'
-import ClientsList, { type ClientInfo } from '../components/ClientsList'
-import InstructionsSection from '../components/InstructionsSection'
-import SettingsSection from '../components/SettingsSection'
-import DccChatroom from '../components/DccChatroom'
-import VideoPlayerSection from '../components/VideoPlayerSection'
+import ConnectionForm from '../components/ConnectionForm/index'
+import ChatSection, { type ChatMessage } from '../components/ChatSection/index'
+import ClientsList, { type ClientInfo } from '../components/ClientsList/index'
+import InstructionsSection from '../components/InstructionsSection/index'
+import SettingsSection from '../components/SettingsSection/index'
+import DccChatroom from '../components/DccChatroom/index'
+import VideoPlayerSection from '../components/VideoPlayerSection/index'
 
 export default function Home() {
   const [serverIp, setServerIp] = useState('127.0.0.1')
@@ -34,6 +34,7 @@ export default function Home() {
   const isNarrow = winWidth <= 800
   const [pendingDcc, setPendingDcc] = useState<{ ip: string; port: number } | null>(null)
   const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined)
+  const [incomingOffer, setIncomingOffer] = useState<{ from_ip: string; from_port: number; name: string; size: number } | null>(null)
 
   useEffect(() => {
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
@@ -75,9 +76,9 @@ export default function Home() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Listen for DCC request events to open with approval
+  // Listen for DCC request/opened/file-offer events
   useEffect(() => {
-    const unlistenDcc = listen<{ ip: string; port: number }>('dcc-request', async (event) => {
+    const unlistenReq = listen<{ ip: string; port: number }>('dcc-request', async (event) => {
       const { ip, port } = event.payload
       const cfg = getConfig()
       if (cfg.approvedPeers[peerKey(ip, port)]) {
@@ -86,8 +87,32 @@ export default function Home() {
         setPendingDcc({ ip, port })
       }
     })
+
+    const unlistenOpened = listen<{ ip: string; port: number }>('dcc-opened', async (event) => {
+      const { ip, port } = event.payload
+      // If we initiated, just make sure peer window is open locally
+      const cfg = getConfig()
+      if (cfg.approvedPeers[peerKey(ip, port)]) {
+        setDccPeer({ ip, port })
+      }
+    })
+
+    const unlistenFileOffer = listen<{ from_ip: string; from_port: number; name: string; size: number }>('dcc-file-offer', async (event) => {
+      const { from_ip, from_port, name, size } = event.payload
+      setIncomingOffer({ from_ip, from_port, name, size })
+      const cfg = getConfig()
+      // Ensure the DCC window is visible for this peer
+      if (cfg.approvedPeers[peerKey(from_ip, from_port)]) {
+        setDccPeer({ ip: from_ip, port: from_port })
+      } else {
+        setPendingDcc({ ip: from_ip, port: from_port })
+      }
+    })
+
     return () => {
-      unlistenDcc.then((f) => f())
+      unlistenReq.then((f) => f())
+      unlistenOpened.then((f) => f())
+      unlistenFileOffer.then((f) => f())
     }
   }, [])
 
@@ -95,6 +120,16 @@ export default function Home() {
   useEffect(() => {
     setConfig({ navSide, autoPlayMedia })
   }, [navSide, autoPlayMedia])
+
+  // Expose a debug hook for Cypress to simulate incoming file offers
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      ;(window as any).debugReceiveFileOffer = (from_ip: string, from_port: number, name: string, size: number) => {
+        setIncomingOffer({ from_ip, from_port, name, size })
+        setDccPeer({ ip: from_ip, port: from_port })
+      }
+    }
+  }, [])
 
   const handleConnect = async () => {
     try {
@@ -221,14 +256,25 @@ export default function Home() {
             clients={clients}
             selfIp={clientIp}
             selfPort={parseInt(clientPort || '0')}
-            onDccConnect={(peer) => {
+            onDccConnect={async (peer) => {
               setDccPeer(peer)
+              // Notify server to relay DCC request to the peer
+              try {
+                await invoke('dcc_request', { toIp: peer.ip, toPort: peer.port })
+              } catch (e) {
+                console.warn('Failed to send dcc_request:', e)
+              }
               // Requirement: When a user hits 'connect' with another user, instantly open a new chatroom
               scrollTo('dcc')
             }}
           />
 
-          <DccChatroom peer={dccPeer} onClose={() => setDccPeer(null)} onPlayback={(url) => setVideoSrc(url)} />
+          <DccChatroom
+            peer={dccPeer}
+            onClose={() => setDccPeer(null)}
+            onPlayback={(url) => setVideoSrc(url)}
+            incomingOffer={dccPeer && incomingOffer && incomingOffer.from_ip === dccPeer.ip && incomingOffer.from_port === dccPeer.port ? { name: incomingOffer.name, size: incomingOffer.size } : null}
+          />
 
           <SettingsSection
             navSide={navSide}
@@ -250,11 +296,16 @@ export default function Home() {
               <button className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600" onClick={() => setPendingDcc(null)}>Decline</button>
               <button
                 className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700"
-                onClick={() => {
+                onClick={async () => {
                   const key = peerKey(pendingDcc.ip, pendingDcc.port)
                   const cfg = getConfig()
                   setConfig({ approvedPeers: { ...cfg.approvedPeers, [key]: true } })
                   setDccPeer(pendingDcc)
+                  try {
+                    await invoke('dcc_opened', { toIp: pendingDcc.ip, toPort: pendingDcc.port })
+                  } catch (e) {
+                    console.warn('Failed to notify dcc_opened:', e)
+                  }
                   setPendingDcc(null)
                 }}
               >Approve</button>

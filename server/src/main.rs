@@ -66,6 +66,31 @@ enum Message {
         timestamp: String,
         channel: String,
     },
+    // DCC signaling (server-relayed)
+    #[serde(rename = "dcc_request")]
+    DccRequest {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+    },
+    #[serde(rename = "dcc_opened")]
+    DccOpened {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+    },
+    #[serde(rename = "file_offer")]
+    FileOffer {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        size: u64,
+        // a preview or stream URL could be provided in future; omitted here
+    },
 }
 
 type ClientMap = Arc<RwLock<HashMap<SocketAddr, ClientInfo>>>;
@@ -342,6 +367,29 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                             };
                                             broadcast_message(&writers, &chat_msg, None).await;  // None = include sender
                                         }
+                                        Message::DccRequest { from_ip, from_port, to_ip, to_port } => {
+                                            println!("📨 DCC request {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
+                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
+                                                let msg = Message::DccRequest { from_ip, from_port, to_ip, to_port };
+                                                send_to_addr(&writers, target_addr, &msg).await;
+                                            } else {
+                                                println!("⚠️  DCC target not found: {}:{}", to_ip, to_port);
+                                            }
+                                        }
+                                        Message::DccOpened { from_ip, from_port, to_ip, to_port } => {
+                                            println!("🪟 DCC opened {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
+                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
+                                                let msg = Message::DccOpened { from_ip, from_port, to_ip, to_port };
+                                                send_to_addr(&writers, target_addr, &msg).await;
+                                            }
+                                        }
+                                        Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size } => {
+                                            println!("📁 File offer {}:{} -> {}:{} [{} - {} bytes]", from_ip, from_port, to_ip, to_port, name, size);
+                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
+                                                let msg = Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size };
+                                                send_to_addr(&writers, target_addr, &msg).await;
+                                            }
+                                        }
                                         _ => {
                                             // Handle other messages if needed
                                         }
@@ -477,5 +525,38 @@ async fn broadcast_message(writers: &WriterMap, message: &Message, exclude: Opti
 
     if !failed_addrs.is_empty() {
         println!("⚠️  Failed to broadcast to {} clients", failed_addrs.len());
+    }
+}
+
+async fn find_addr_by_ip_port(clients: &ClientMap, ip: &str, port: u16) -> Option<SocketAddr> {
+    let clients_lock = clients.read().await;
+    for (addr, info) in clients_lock.iter() {
+        if info.ip == ip && info.port == port {
+            return Some(*addr);
+        }
+    }
+    None
+}
+
+async fn send_to_addr(writers: &WriterMap, addr: SocketAddr, message: &Message) {
+    let json = match serde_json::to_string(message) {
+        Ok(j) => j + "\n",
+        Err(e) => {
+            println!("❌ Error serializing message: {}", e);
+            return;
+        }
+    };
+    let writers_lock = writers.read().await;
+    if let Some(writer) = writers_lock.get(&addr) {
+        let mut writer_lock = writer.lock().await;
+        if let Err(e) = writer_lock.write_all(json.as_bytes()).await {
+            println!("❌ Failed to send to {}: {}", addr, e);
+            return;
+        }
+        if let Err(e) = writer_lock.flush().await {
+            println!("❌ Failed to flush to {}: {}", addr, e);
+        }
+    } else {
+        println!("⚠️  Writer not found for {}", addr);
     }
 }

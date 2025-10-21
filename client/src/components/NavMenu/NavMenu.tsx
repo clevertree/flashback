@@ -1,6 +1,6 @@
 "use client"
 import React, { useEffect, useState } from 'react'
-import type { NavSide } from '../config'
+import type { NavSide } from '../../config'
 
 export interface NavMenuProps {
   side: NavSide

@@ -14,7 +14,9 @@
     "tauri:build-ubuntu": "PKG_CONFIG_PATH=\"/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}\" tauri build",
     "tauri:build": "tauri build",
     "build-icon": "npx tauri icon src-tauri/icons/icon.png",
-    "test:cy": "cypress run"
+    "cypress:install": "cypress install",
+    "cypress:open": "cypress open",
+    "cypress:component": "cypress run --component"
   },
   "dependencies": {
     "@tauri-apps/plugin-shell": "^2.3.1",

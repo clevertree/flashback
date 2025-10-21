@@ -1,5 +1,6 @@
 "use client"
 import React, { useMemo, useRef, useState } from 'react'
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 
 export interface DccPeer {
   ip: string
@@ -17,15 +18,25 @@ export interface DccChatroomProps {
   onClose: () => void
   onSendFile?: (file: File, startTimeSec?: number) => void
   onPlayback?: (url: string) => void
+  incomingOffer?: { name: string; size: number } | null
+  invokeFn?: (cmd: string, args?: any) => Promise<any>
 }
 
-export default function DccChatroom({ peer, onClose, onSendFile, onPlayback }: DccChatroomProps) {
+export default function DccChatroom({ peer, onClose, onSendFile, onPlayback, incomingOffer, invokeFn = tauriInvoke }: DccChatroomProps) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<DccMessage[]>([])
   const [logs, setLogs] = useState<string[]>([])
   const [incomingFile, setIncomingFile] = useState<{ name: string; url: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const peerLabel = useMemo(() => (peer ? `${peer.ip}:${peer.port}` : 'No peer'), [peer])
+
+  // Reflect incoming offers from props (receiver side)
+  React.useEffect(() => {
+    if (incomingOffer) {
+      setIncomingFile({ name: incomingOffer.name, url: '' })
+      log(`Incoming file offer: ${incomingOffer.name} (${incomingOffer.size} bytes)`)
+    }
+  }, [incomingOffer])
 
   if (!peer) return null
 
@@ -55,8 +66,11 @@ export default function DccChatroom({ peer, onClose, onSendFile, onPlayback }: D
   function onFileChosen(file: File) {
     log(`Selected file: ${file.name} (${file.size} bytes)`)
     onSendFile?.(file)
+    // Notify remote via server relay that a file is offered
+    invokeFn('dcc_file_offer', { toIp: peer!.ip, toPort: peer!.port, name: file.name, size: file.size }).catch((e: any) => {
+      log(`Failed to send file offer: ${e}`)
+    })
     // Sender should NOT see receiver options; simulate sending an offer to the peer only.
-    // In a full implementation, this would signal the remote client.
     const url = URL.createObjectURL(file)
     log(`Sent file offer to ${peerLabel}`)
     // Do not set incomingFile here to avoid showing receiver UI on sender
@@ -102,10 +116,13 @@ export default function DccChatroom({ peer, onClose, onSendFile, onPlayback }: D
       {incomingFile && (
         <div className="bg-gray-700/60 border border-gray-600 rounded p-3 mb-3">
           <div className="mb-2 text-sm">Incoming file: <span className="font-mono text-blue-200">{incomingFile.name}</span></div>
+          {(!incomingFile.url || incomingFile.url.length === 0) && (
+            <div className="text-xs text-yellow-300 mb-2">Waiting for stream/data from sender…</div>
+          )}
           <div className="flex gap-2 flex-wrap">
-            <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={() => handleOpenWithOS(incomingFile.url)}>Open with OS</button>
-            <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={() => handleSaveToOS(incomingFile.url, incomingFile.name)}>Save to OS</button>
-            <button className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handlePlayback(incomingFile.url)}>Playback</button>
+            <button disabled={!incomingFile.url} className="px-3 py-1 text-sm bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-600 rounded" onClick={() => handleOpenWithOS(incomingFile.url)}>Open with OS</button>
+            <button disabled={!incomingFile.url} className="px-3 py-1 text-sm bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-600 rounded" onClick={() => handleSaveToOS(incomingFile.url, incomingFile.name)}>Save to OS</button>
+            <button disabled={!incomingFile.url} className="px-3 py-1 text-sm bg-blue-600 disabled:bg-blue-900/50 disabled:cursor-not-allowed hover:bg-blue-700 rounded" onClick={() => handlePlayback(incomingFile.url)}>Playback</button>
             <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={() => { setIncomingFile(null); log('Dismissed incoming file offer.') }}>Dismiss</button>
           </div>
         </div>
@@ -143,7 +160,6 @@ export default function DccChatroom({ peer, onClose, onSendFile, onPlayback }: D
         onChange={(e) => {
           const f = e.target.files?.[0]
           if (f) onFileChosen(f)
-          // reset input
           if (fileInputRef.current) fileInputRef.current.value = ''
         }}
       />

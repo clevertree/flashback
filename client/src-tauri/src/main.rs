@@ -53,6 +53,12 @@ enum Message {
         timestamp: String,
         channel: String,
     },
+    #[serde(rename = "dcc_request")]
+    DccRequest { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
+    #[serde(rename = "dcc_opened")]
+    DccOpened { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
+    #[serde(rename = "file_offer")]
+    FileOffer { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, size: u64 },
 }
 
 struct AppState {
@@ -494,6 +500,21 @@ async fn connect_to_server(
                                 });
                                 let _ = app_handle_clone.emit("chat-message", chat_data);
                             }
+                            Message::DccRequest { from_ip, from_port, .. } => {
+                                println!("📨 DCC request received from {}:{}", from_ip, from_port);
+                                let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                let _ = app_handle_clone.emit("dcc-request", payload);
+                            }
+                            Message::DccOpened { from_ip, from_port, .. } => {
+                                println!("🪟 DCC opened notification from {}:{}", from_ip, from_port);
+                                let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                let _ = app_handle_clone.emit("dcc-opened", payload);
+                            }
+                            Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                println!("📁 File offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
+                                let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
+                                let _ = app_handle_clone.emit("dcc-file-offer", payload);
+                            }
                             _ => {
                                 // Handle other message types if needed
                             }
@@ -566,6 +587,48 @@ fn get_clients(state: State<'_, AppState>) -> Vec<ClientInfo> {
 }
 
 #[tauri::command]
+async fn dcc_request(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
+    let tx_opt = state.tx.lock().unwrap().clone();
+    let self_opt = state.self_info.lock().unwrap().clone();
+    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
+    if let Some(tx) = tx_opt {
+        let msg = Message::DccRequest { from_ip, from_port, to_ip, to_port };
+        tx.send(msg).await.map_err(|e| e.to_string())?;
+        Ok("dcc_request sent".into())
+    } else {
+        Err("Not connected to server".into())
+    }
+}
+
+#[tauri::command]
+async fn dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
+    let tx_opt = state.tx.lock().unwrap().clone();
+    let self_opt = state.self_info.lock().unwrap().clone();
+    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
+    if let Some(tx) = tx_opt {
+        let msg = Message::DccOpened { from_ip, from_port, to_ip, to_port };
+        tx.send(msg).await.map_err(|e| e.to_string())?;
+        Ok("dcc_opened sent".into())
+    } else {
+        Err("Not connected to server".into())
+    }
+}
+
+#[tauri::command]
+async fn dcc_file_offer(to_ip: String, to_port: u16, name: String, size: u64, state: State<'_, AppState>) -> Result<String, String> {
+    let tx_opt = state.tx.lock().unwrap().clone();
+    let self_opt = state.self_info.lock().unwrap().clone();
+    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
+    if let Some(tx) = tx_opt {
+        let msg = Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size };
+        tx.send(msg).await.map_err(|e| e.to_string())?;
+        Ok("file_offer sent".into())
+    } else {
+        Err("Not connected to server".into())
+    }
+}
+
+#[tauri::command]
 async fn send_chat_message(
     message: String,
     channel: String,
@@ -611,7 +674,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             connect_to_server,
             get_clients,
-            send_chat_message
+            send_chat_message,
+            dcc_request,
+            dcc_opened,
+            dcc_file_offer
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
