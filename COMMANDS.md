@@ -5,7 +5,8 @@ Client Commands (UI)
 - Channel Add: creates a new chat channel in the current session
 - Send Message: broadcasts a message to the selected channel
 - DCC Connect: from Clients list, click Connect on a peer to open a direct chatroom (no auto-connect)
-- /File in DCC: initiates a file stream request to the peer. Optional parameter: start=<seconds> to resume at a time.
+- DCC Approval: receiving client shows an approval prompt for new peers; once approved, future requests from the same ip:port auto-open
+- /File in DCC: initiates a file request. Sender selects a file; receiver may Open with OS, Save to OS, or Playback in the Media Player. Optional parameter: start=<seconds> to resume at a time.
 
 On Connect
 - Client issues /LIST to server to request the connected user list

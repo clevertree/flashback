@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import NavMenu from '../components/NavMenu'
-import { getConfig, setConfig, type NavSide } from '../config'
+import { getConfig, setConfig, type NavSide, peerKey } from '../config'
 import ConnectionForm from '../components/ConnectionForm'
 import ChatSection, { type ChatMessage } from '../components/ChatSection'
 import ClientsList, { type ClientInfo } from '../components/ClientsList'
@@ -30,6 +30,10 @@ export default function Home() {
   const [navSide, setNavSide] = useState<NavSide>(getConfig().navSide)
   const [autoPlayMedia, setAutoPlayMedia] = useState<boolean>(getConfig().autoPlayMedia)
   const [dccPeer, setDccPeer] = useState<{ ip: string; port: number } | null>(null)
+  const [winWidth, setWinWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1024)
+  const isNarrow = winWidth <= 800
+  const [pendingDcc, setPendingDcc] = useState<{ ip: string; port: number } | null>(null)
+  const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
@@ -58,6 +62,32 @@ export default function Home() {
       unlistenDisconnect.then((f) => f())
       unlistenError.then((f) => f())
       unlistenChat.then((f) => f())
+    }
+  }, [])
+
+  // Window resize listener for responsive behavior
+  useEffect(() => {
+    function onResize() {
+      setWinWidth(window.innerWidth)
+    }
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Listen for DCC request events to open with approval
+  useEffect(() => {
+    const unlistenDcc = listen<{ ip: string; port: number }>('dcc-request', async (event) => {
+      const { ip, port } = event.payload
+      const cfg = getConfig()
+      if (cfg.approvedPeers[peerKey(ip, port)]) {
+        setDccPeer({ ip, port })
+      } else {
+        setPendingDcc({ ip, port })
+      }
+    })
+    return () => {
+      unlistenDcc.then((f) => f())
     }
   }, [])
 
@@ -126,24 +156,25 @@ export default function Home() {
 
   return (
     <>
-      <NavMenu
-        side={navSide}
-        items={[
-          { label: 'Connection', onClick: () => scrollTo('connection') },
-          { label: 'Chat', onClick: () => scrollTo('chat') },
-          { label: 'Clients', onClick: () => scrollTo('clients') },
-          { label: 'Video', onClick: () => scrollTo('video') },
-          { label: 'Settings', onClick: () => scrollTo('settings') },
-          { label: 'Instructions', onClick: () => scrollTo('instructions') },
-        ]}
-      />
-      <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white transition-all duration-300 ${navSide === 'left' ? 'ml-56' : 'mr-56'}`}>
-        <div className="max-w-4xl mx-auto">
+      {!isNarrow && (
+        <NavMenu
+          side={navSide}
+          items={[
+            { label: 'Connection', onClick: () => scrollTo('connection') },
+            { label: 'Chat', onClick: () => scrollTo('chat') },
+            { label: 'Clients', onClick: () => scrollTo('clients') },
+            { label: 'Video', onClick: () => scrollTo('video') },
+            { label: 'Settings', onClick: () => scrollTo('settings') },
+            { label: 'Instructions', onClick: () => scrollTo('instructions') },
+          ]}
+        />
+      )}
+      <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white transition-all duration-300 ${!isNarrow ? (navSide === 'left' ? 'ml-56' : 'mr-56') : ''}`}>
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-3xl font-bold">Junie IRC Client</h1>
           </div>
 
-          <VideoPlayerSection autoPlay={autoPlayMedia} />
+          <VideoPlayerSection autoPlay={autoPlayMedia} source={videoSrc} />
 
           <ConnectionForm
             serverIp={serverIp}
@@ -189,7 +220,7 @@ export default function Home() {
             }}
           />
 
-          <DccChatroom peer={dccPeer} onClose={() => setDccPeer(null)} />
+          <DccChatroom peer={dccPeer} onClose={() => setDccPeer(null)} onPlayback={(url) => setVideoSrc(url)} />
 
           <SettingsSection
             navSide={navSide}
@@ -199,8 +230,30 @@ export default function Home() {
           />
 
           <InstructionsSection />
-        </div>
       </main>
+
+      {/* DCC Approval Modal */}
+      {pendingDcc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 w-[90%] max-w-md">
+            <h3 className="text-xl font-semibold mb-2">Incoming DCC Request</h3>
+            <p className="text-sm text-gray-300 mb-4">Peer {pendingDcc.ip}:{pendingDcc.port} wants to open a direct chat. Approve?</p>
+            <div className="flex justify-end gap-2">
+              <button className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600" onClick={() => setPendingDcc(null)}>Decline</button>
+              <button
+                className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700"
+                onClick={() => {
+                  const key = peerKey(pendingDcc.ip, pendingDcc.port)
+                  const cfg = getConfig()
+                  setConfig({ approvedPeers: { ...cfg.approvedPeers, [key]: true } })
+                  setDccPeer(pendingDcc)
+                  setPendingDcc(null)
+                }}
+              >Approve</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

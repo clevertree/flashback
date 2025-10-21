@@ -9,7 +9,8 @@
 - **Requirements**:
   - [x] Configurable positioning (left/right)
   - [x] Smooth animation/transition
-  - [ ] Responsive design (mobile/collapsible) — deferred
+  - [x] Auto-hide at <= 800px; fixed at > 800px
+  - [ ] Mobile/collapsible menu — deferred
 
 ### 2. Theme System Implementation  
 - **Task**: Allow switching between themes

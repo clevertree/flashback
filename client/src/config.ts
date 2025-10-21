@@ -4,12 +4,14 @@ export interface AppConfig {
   navSide: NavSide
   // Future settings placeholders
   autoPlayMedia: boolean
+  approvedPeers: Record<string, boolean> // key: "ip:port" -> approved once
 }
 
 // Runtime config with defaults; backward compatible with older stored keys.
 const defaultConfig: AppConfig = {
   navSide: 'left',
   autoPlayMedia: true,
+  approvedPeers: {},
 }
 
 export function getConfig(): AppConfig {
@@ -34,4 +36,8 @@ export function setConfig(partial: Partial<AppConfig>) {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem('flashback.config', JSON.stringify(next))
   }
+}
+
+export function peerKey(ip: string, port: number) {
+  return `${ip}:${port}`
 }
