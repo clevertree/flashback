@@ -1,15 +1,18 @@
 export type ThemeType = 'stacked' | 'tabbed'
 export type NavSide = 'left' | 'right'
+export type MainTab = 'Connection' | 'Chat' | 'Clients' | 'Instructions'
 
 export interface AppConfig {
   navSide: NavSide
   theme: ThemeType
+  activeTab?: MainTab
 }
 
 // Simple runtime config with defaults; can be extended to read from localStorage or a JSON file.
 const defaultConfig: AppConfig = {
   navSide: 'left',
   theme: 'stacked',
+  activeTab: 'Connection',
 }
 
 export function getConfig(): AppConfig {

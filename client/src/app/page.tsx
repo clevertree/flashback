@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import NavMenu from '../components/NavMenu'
 import ThemeSwitcher from '../components/ThemeSwitcher'
-import { getConfig, setConfig, type NavSide, type ThemeType } from '../config'
+import { getConfig, setConfig, type NavSide, type ThemeType, type MainTab } from '../config'
 
 interface ClientInfo {
   ip: string
@@ -37,7 +37,7 @@ export default function Home() {
   const [newChannelInput, setNewChannelInput] = useState('')
   const [theme, setTheme] = useState<ThemeType>(getConfig().theme)
   const [navSide, setNavSide] = useState<NavSide>(getConfig().navSide)
-  const [activeTab, setActiveTab] = useState<'Connection' | 'Chat' | 'Clients' | 'Instructions'>('Connection')
+  const [activeTab, setActiveTab] = useState<MainTab>(getConfig().activeTab || 'Connection')
 
   useEffect(() => {
     // Generate random client port
@@ -78,8 +78,8 @@ export default function Home() {
 
   // Persist UI preferences
   useEffect(() => {
-    setConfig({ theme, navSide })
-  }, [theme, navSide])
+    setConfig({ theme, navSide, activeTab })
+  }, [theme, navSide, activeTab])
 
   const handleConnect = async () => {
     try {
@@ -146,7 +146,7 @@ export default function Home() {
           { label: 'Instructions', onClick: () => setActiveTab('Instructions') },
         ]}
       />
-      <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white ${navSide === 'left' ? 'ml-56' : 'mr-56'}`}>
+      <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white transition-all duration-300 ${navSide === 'left' ? 'ml-56' : 'mr-56'}`}>
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-3xl font-bold">Client-Server Connection</h1>
@@ -154,7 +154,7 @@ export default function Home() {
               <ThemeSwitcher theme={theme} onChange={setTheme} />
               <button
                 onClick={() => setNavSide(navSide === 'left' ? 'right' : 'left')}
-                className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded"
+                className="px-3 py-1 text-sm bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 title="Move Navigation"
               >
                 Move Nav {navSide === 'left' ? '→' : '←'}
@@ -163,12 +163,14 @@ export default function Home() {
           </div>
 
           {theme === 'tabbed' && (
-            <div className="mb-6 border-b border-gray-700">
+            <div className="mb-6 border-b border-gray-700" role="tablist" aria-label="Sections">
               {(['Connection', 'Chat', 'Clients', 'Instructions'] as const).map((tab) => (
                 <button
                   key={tab}
+                  role="tab"
+                  aria-selected={activeTab === tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`mr-2 px-3 py-2 text-sm rounded-t ${
+                  className={`mr-2 px-3 py-2 text-sm rounded-t focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                     activeTab === tab ? 'bg-gray-800 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
