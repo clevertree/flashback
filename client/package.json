@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:auto": "start-client.sh",
-    "tauri:build": "PKG_CONFIG_PATH=\"/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}\" tauri build",
+    "tauri:build-ubuntu": "PKG_CONFIG_PATH=\"/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}\" tauri build",
+    "tauri:build": "tauri build",
     "build-icon": "npx tauri icon src-tauri/icons/icon.png"
   },
   "dependencies": {
