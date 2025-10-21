@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import ClientsList, { ClientInfo } from '@components/ClientsList/index'
+
+import ClientsList, {ClientInfo} from "@components/ClientsList/ClientsList";
 
 describe('ClientsList component', () => {
   it('renders clients and triggers onDccConnect', () => {

@@ -91,6 +91,15 @@ enum Message {
         size: u64,
         // a preview or stream URL could be provided in future; omitted here
     },
+    #[serde(rename = "file_accept")]
+    FileAccept {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        action: String,
+    },
 }
 
 type ClientMap = Arc<RwLock<HashMap<SocketAddr, ClientInfo>>>;
@@ -387,6 +396,13 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                             println!("📁 File offer {}:{} -> {}:{} [{} - {} bytes]", from_ip, from_port, to_ip, to_port, name, size);
                                             if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
                                                 let msg = Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size };
+                                                send_to_addr(&writers, target_addr, &msg).await;
+                                            }
+                                        }
+                                        Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action } => {
+                                            println!("✅ File accept {}:{} -> {}:{} [{} action={}]", from_ip, from_port, to_ip, to_port, name, action);
+                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
+                                                let msg = Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action };
                                                 send_to_addr(&writers, target_addr, &msg).await;
                                             }
                                         }

@@ -1,13 +1,13 @@
-"use client"
-import React, { useEffect, useState } from 'react'
-import type { NavSide } from '../../config'
+import type {NavSide} from "@app/config";
+import React, {useEffect, useState} from "react";
 
 export interface NavMenuProps {
   side: NavSide
   items?: { label: string; onClick: () => void }[]
+  onClose?: () => void
 }
 
-export default function NavMenu({ side, items = [] }: NavMenuProps) {
+export default function NavMenu({ side, items = [], onClose }: NavMenuProps) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 0)
@@ -34,7 +34,7 @@ export default function NavMenu({ side, items = [] }: NavMenuProps) {
             <button
               key={idx}
               className="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              onClick={it.onClick}
+              onClick={() => { it.onClick(); onClose && onClose(); }}
             >
               {it.label}
             </button>

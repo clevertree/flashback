@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import VideoPlayerSection from '@components/VideoPlayerSection/index'
+
+import VideoPlayerSection from "@components/VideoPlayerSection/VideoPlayerSection";
 
 describe('VideoPlayerSection component', () => {
   it('sets video source when provided', () => {

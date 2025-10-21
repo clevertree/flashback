@@ -59,6 +59,8 @@ enum Message {
     DccOpened { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
     #[serde(rename = "file_offer")]
     FileOffer { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, size: u64 },
+    #[serde(rename = "file_accept")]
+    FileAccept { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, action: String },
 }
 
 struct AppState {
@@ -515,6 +517,11 @@ async fn connect_to_server(
                                 let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
                                 let _ = app_handle_clone.emit("dcc-file-offer", payload);
                             }
+                            Message::FileAccept { from_ip, from_port, name, action, .. } => {
+                                println!("✅ File accept received from {}:{} [{} action={}]", from_ip, from_port, name, action);
+                                let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
+                                let _ = app_handle_clone.emit("dcc-file-accept", payload);
+                            }
                             _ => {
                                 // Handle other message types if needed
                             }
@@ -629,6 +636,20 @@ async fn dcc_file_offer(to_ip: String, to_port: u16, name: String, size: u64, st
 }
 
 #[tauri::command]
+async fn dcc_file_accept(to_ip: String, to_port: u16, name: String, action: String, state: State<'_, AppState>) -> Result<String, String> {
+    let tx_opt = state.tx.lock().unwrap().clone();
+    let self_opt = state.self_info.lock().unwrap().clone();
+    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
+    if let Some(tx) = tx_opt {
+        let msg = Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action };
+        tx.send(msg).await.map_err(|e| e.to_string())?;
+        Ok("file_accept sent".into())
+    } else {
+        Err("Not connected to server".into())
+    }
+}
+
+#[tauri::command]
 async fn send_chat_message(
     message: String,
     channel: String,
@@ -670,6 +691,8 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             connect_to_server,
@@ -677,7 +700,8 @@ fn main() {
             send_chat_message,
             dcc_request,
             dcc_opened,
-            dcc_file_offer
+            dcc_file_offer,
+            dcc_file_accept
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

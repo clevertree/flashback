@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import NavMenu from '@components/NavMenu/index'
+
+import NavMenu from "@components/NavMenu/NavMenu";
 
 describe('NavMenu component', () => {
   it('renders items and calls onClick', () => {

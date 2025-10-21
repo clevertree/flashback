@@ -3,15 +3,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import NavMenu from '../components/NavMenu/index'
-import { getConfig, setConfig, type NavSide, peerKey } from '../config'
-import ConnectionForm from '../components/ConnectionForm/index'
-import ChatSection, { type ChatMessage } from '../components/ChatSection/index'
-import ClientsList, { type ClientInfo } from '../components/ClientsList/index'
-import InstructionsSection from '../components/InstructionsSection/index'
-import SettingsSection from '../components/SettingsSection/index'
-import DccChatroom from '../components/DccChatroom/index'
-import VideoPlayerSection from '../components/VideoPlayerSection/index'
+import { getConfig, setConfig, type NavSide, peerKey } from '@app/config'
+
+import VideoPlayerSection from "@components/VideoPlayerSection/VideoPlayerSection";
+import SettingsSection from "@components/SettingsSection/SettingsSection";
+import NavMenu from "@components/NavMenu/NavMenu";
+import InstructionsSection from "@components/InstructionsSection/InstructionsSection";
+import DccChatroom from "@components/DccChatroom/DccChatroom";
+import ConnectionForm from "@components/ConnectionForm/ConnectionForm";
+import ClientsList, {ClientInfo} from "@components/ClientsList/ClientsList";
+import ChatSection, {ChatMessage} from "@components/ChatSection/ChatSection";
 
 export default function Home() {
   const [serverIp, setServerIp] = useState('127.0.0.1')
@@ -35,6 +36,8 @@ export default function Home() {
   const [pendingDcc, setPendingDcc] = useState<{ ip: string; port: number } | null>(null)
   const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined)
   const [incomingOffer, setIncomingOffer] = useState<{ from_ip: string; from_port: number; name: string; size: number } | null>(null)
+  const [showMobileNav, setShowMobileNav] = useState(false)
+  const [offeredFiles, setOfferedFiles] = useState<Record<string, File>>({})
 
   useEffect(() => {
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
@@ -109,12 +112,30 @@ export default function Home() {
       }
     })
 
+    // When the receiver accepts, if we (this tab) offered a file to that peer, broadcast a local stream URL
+    const unlistenFileAccept = listen<{ from_ip: string; from_port: number; name: string; action: string }>('dcc-file-accept', async (event) => {
+      try {
+        const { from_ip, from_port, name } = event.payload
+        const key = peerKey(from_ip, from_port) // map is keyed by receiver peer
+        const file = offeredFiles[key]
+        if (file) {
+          const url = URL.createObjectURL(file)
+          const bc = new BroadcastChannel('dcc-stream')
+          bc.postMessage({ from_ip: clientIp, from_port: parseInt(clientPort || '0'), to_ip: from_ip, to_port: from_port, name, url })
+          bc.close()
+        }
+      } catch (e) {
+        console.warn('Failed to broadcast local stream URL on accept:', e)
+      }
+    })
+
     return () => {
       unlistenReq.then((f) => f())
       unlistenOpened.then((f) => f())
       unlistenFileOffer.then((f) => f())
+      unlistenFileAccept.then((f) => f())
     }
-  }, [])
+  }, [offeredFiles, clientIp, clientPort])
 
   // Persist UI preferences
   useEffect(() => {
@@ -212,6 +233,37 @@ export default function Home() {
           ]}
         />
       )}
+      {isNarrow && showMobileNav && (
+        <div className="fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileNav(false)} />
+          <NavMenu
+            side={navSide}
+            onClose={() => setShowMobileNav(false)}
+            items={[
+              { label: 'Connection', onClick: () => scrollTo('connection') },
+              { label: 'Chat', onClick: () => scrollTo('chat') },
+              { label: 'Clients', onClick: () => scrollTo('clients') },
+              { label: 'Video', onClick: () => scrollTo('video') },
+              { label: 'Settings', onClick: () => scrollTo('settings') },
+              { label: 'Instructions', onClick: () => scrollTo('instructions') },
+            ]}
+          />
+        </div>
+      )}
+      {/* Floating mobile nav button */}
+      {isNarrow && (
+        <button
+          aria-label="Open navigation"
+          className={`fixed bottom-5 ${navSide === 'left' ? 'left-5' : 'right-5'} z-50 rounded-full w-12 h-12 bg-blue-600 hover:bg-blue-700 shadow-lg flex items-center justify-center`}
+          onClick={() => setShowMobileNav((s) => !s)}
+        >
+          <span className="sr-only">Toggle navigation</span>
+          {/* simple hamburger icon */}
+          <span className="block w-6 h-0.5 bg-white mb-1" />
+          <span className="block w-6 h-0.5 bg-white mb-1" />
+          <span className="block w-6 h-0.5 bg-white" />
+        </button>
+      )}
       <main className={`min-h-screen p-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white transition-all duration-300 ${!isNarrow ? (navSide === 'left' ? 'ml-56' : 'mr-56') : ''}`}>
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-3xl font-bold">Junie IRC Client</h1>
@@ -272,6 +324,7 @@ export default function Home() {
           <DccChatroom
             peer={dccPeer}
             onClose={() => setDccPeer(null)}
+            onSendFile={(file) => { if (dccPeer) { setOfferedFiles(prev => ({ ...prev, [peerKey(dccPeer.ip, dccPeer.port)]: file })) } }}
             onPlayback={(url) => setVideoSrc(url)}
             incomingOffer={dccPeer && incomingOffer && incomingOffer.from_ip === dccPeer.ip && incomingOffer.from_port === dccPeer.port ? { name: incomingOffer.name, size: incomingOffer.size } : null}
           />

@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import DccChatroom from '@components/DccChatroom/index'
+
+import DccChatroom from "@components/DccChatroom/DccChatroom";
 
 describe('DccChatroom component', () => {
   it('shows incoming file offer UI and does not call real invoke when mocked', () => {

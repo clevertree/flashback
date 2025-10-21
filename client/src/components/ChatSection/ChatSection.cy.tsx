@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import ChatSection, { ChatMessage } from '@components/ChatSection/index'
+
+import ChatSection, {ChatMessage} from "@components/ChatSection/ChatSection";
 
 describe('ChatSection component', () => {
   it('renders messages for current channel and sends', () => {

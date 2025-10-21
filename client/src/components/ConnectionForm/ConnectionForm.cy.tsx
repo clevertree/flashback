@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import ConnectionForm from '@components/ConnectionForm/index'
+
+import ConnectionForm from "@components/ConnectionForm/ConnectionForm";
 
 describe('ConnectionForm component', () => {
   it('disables inputs and button when connected', () => {

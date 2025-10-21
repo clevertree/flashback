@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import InstructionsSection from '@components/InstructionsSection/index'
+
+import InstructionsSection from "@components/InstructionsSection/InstructionsSection";
 
 describe('InstructionsSection component', () => {
   it('renders instructions', () => {

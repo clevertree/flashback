@@ -1,6 +1,7 @@
 import React from 'react'
 import { mount } from 'cypress/react18'
-import SettingsSection from '@components/SettingsSection/index'
+
+import SettingsSection from "@components/SettingsSection/SettingsSection";
 
 describe('SettingsSection component', () => {
   it('toggles nav side and autoplay', () => {
