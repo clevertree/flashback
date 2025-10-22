@@ -9,6 +9,7 @@ Client UI
 - Always-visible Media Player section that can accept streaming connections and play back media
 - DCC (Direct Client-to-Client) chatroom opens when user clicks Connect on a peer; receiving client shows an approval prompt (one-time per peer)
 - DCC window includes logs panel and /File workflow (sender picks file; receiver can Open, Save, or Playback in the video player)
+- DCC signaling and transfers are peer-to-peer only; the server does not relay DCC attempts or file data
 
 Server/Networking (existing)
 - Connect to server with IP/port selection

@@ -12,12 +12,24 @@ export interface ClientsListProps {
   selfIp: string
   selfPort: number
   onDccConnect: (client: ClientInfo) => void
+  onlineKeys?: Set<string>
+  showHistoric?: boolean
+  onToggleHistoric?: () => void
 }
 
-export default function ClientsList({ id = 'clients', clients, selfIp, selfPort, onDccConnect }: ClientsListProps) {
+export default function ClientsList({ id = 'clients', clients, selfIp, selfPort, onDccConnect, onlineKeys, showHistoric, onToggleHistoric }: ClientsListProps) {
+  const onlineCount = clients.filter(c => onlineKeys?.has(`${c.ip}:${c.port}`)).length
+  const header = showHistoric ? `Clients (${onlineCount} online${clients.length > onlineCount ? `, ${clients.length - onlineCount} historic` : ''})` : `Connected Clients (${clients.length})`
   return (
     <section id={id} className="bg-gray-800 rounded-lg p-6 shadow-lg">
-      <h2 className="text-2xl font-semibold mb-4">Connected Clients ({clients.length})</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-semibold">{header}</h2>
+        {typeof showHistoric === 'boolean' && onToggleHistoric && (
+          <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={onToggleHistoric}>
+            {showHistoric ? 'Hide historic' : 'Show historic'}
+          </button>
+        )}
+      </div>
       {clients.length === 0 ? (
         <p className="text-gray-400 text-center py-8">No clients connected yet. Connect to see other clients.</p>
       ) : (
@@ -27,6 +39,7 @@ export default function ClientsList({ id = 'clients', clients, selfIp, selfPort,
             const s = (client as any).peer_status as string | undefined
             const label = s ? s : 'unknown'
             const color = s === 'connected' ? 'bg-green-500' : s === 'connecting' ? 'bg-yellow-500' : isSelf ? 'bg-blue-500' : 'bg-red-500'
+            const isOnline = onlineKeys?.has(`${client.ip}:${client.port}`)
             return (
               <div key={index} className="bg-gray-700 p-4 rounded flex items-center justify-between hover:bg-gray-650 transition-colors">
                 <div>
@@ -36,8 +49,8 @@ export default function ClientsList({ id = 'clients', clients, selfIp, selfPort,
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center">
-                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    <span className="text-sm text-gray-400">Online</span>
+                    <span className={`w-2 h-2 ${isOnline ? 'bg-green-500' : 'bg-gray-500'} rounded-full mr-2`}></span>
+                    <span className="text-sm text-gray-400">{isOnline ? 'Online' : 'Offline'}</span>
                   </div>
                   <div className="flex items-center">
                     <span className={`w-2 h-2 ${color} rounded-full mr-2`}></span>

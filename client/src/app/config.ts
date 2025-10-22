@@ -4,14 +4,30 @@ export interface AppConfig {
   navSide: NavSide
   // Future settings placeholders
   autoPlayMedia: boolean
+  // Connect to server on startup
+  connectOnStartup: boolean
+  // Auto reconnect to previously successful peers
+  autoReconnectPeers: boolean
+  // Toggle showing historic (offline) clients in the client list
+  showHistoricClients: boolean
+  // Optional temp directory for streaming downloads; defaults to OS temp when empty
+  tempDir?: string
+  // Peers the user approved for DCC (one-time approval)
   approvedPeers: Record<string, boolean> // key: "ip:port" -> approved once
+  // Peers we have successfully connected a DCC with before
+  knownPeers: Record<string, boolean>
 }
 
 // Runtime config with defaults; backward compatible with older stored keys.
 const defaultConfig: AppConfig = {
   navSide: 'left',
   autoPlayMedia: true,
+  connectOnStartup: true,
+  autoReconnectPeers: true,
+  showHistoricClients: false,
+  tempDir: '',
   approvedPeers: {},
+  knownPeers: {},
 }
 
 export function getConfig(): AppConfig {

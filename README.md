@@ -154,6 +154,18 @@ The server and client communicate using a simple JSON protocol over TCP:
 }
 ```
 
+## DCC vs Server Responsibilities
+
+- DCC (Direct Client-to-Client) chat and file transfers are strictly peer-to-peer. The server is NOT used to relay DCC requests or file data.
+- The server’s responsibilities are limited to:
+  - Registering clients and broadcasting the active client list
+  - Relaying group chat messages in server rooms/channels
+  - Heartbeats and connection lifecycle
+- Client responsibilities for DCC:
+  - Initiate direct peer connections using the client’s TCP listener
+  - Exchange DCC signaling (request/opened/file-offer/accept/chunk/cancel) directly with the peer
+  - Stream file bytes directly between peers; server is never on the data path
+
 ## Documentation
 
 - `QUICKSTART_CHAT.md` - Quick 3-command start guide

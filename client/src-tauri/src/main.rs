@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, State};
+use tauri::{Emitter, State, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -53,6 +53,8 @@ enum Message {
         timestamp: String,
         channel: String,
     },
+    #[serde(rename = "dcc_chat")]
+    DccChat { from_ip: String, from_port: u16, to_ip: String, to_port: u16, text: String, timestamp: String },
     #[serde(rename = "dcc_request")]
     DccRequest { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
     #[serde(rename = "dcc_opened")]
@@ -61,6 +63,10 @@ enum Message {
     FileOffer { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, size: u64 },
     #[serde(rename = "file_accept")]
     FileAccept { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, action: String },
+    #[serde(rename = "file_chunk")]
+    FileChunk { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, offset: u64, bytes_total: u64, data_base64: String },
+    #[serde(rename = "file_cancel")]
+    FileCancel { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String },
 }
 
 struct AppState {
@@ -69,6 +75,7 @@ struct AppState {
     current_channel: Arc<Mutex<String>>,
     self_info: Arc<Mutex<Option<ClientInfo>>>,
     peers: Arc<Mutex<HashMap<String, PeerConn>>>, // key: "ip:port"
+    peer_writers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>>>>, // key: "ip:port" -> writer
 }
 
 #[tauri::command]
@@ -104,36 +111,127 @@ async fn connect_to_server(
                             Ok((mut stream, remote)) => {
                                 println!("🔗 Incoming peer connection from {}", remote);
                                 let app_handle_incoming = app_handle_clone.clone();
+                                // capture peer_writers map
+                                let pw_map = app_handle_clone.state::<AppState>().peer_writers.clone();
                                 tokio::spawn(async move {
-                                    let (reader, mut writer) = stream.split();
+                                    let (reader, writer) = stream.into_split();
+                                    // keep an Arc to the writer so we can alias it under the correct peer key once we know from_ip/from_port
+                                    let writer_arc = Arc::new(tokio::sync::Mutex::new(writer));
                                     let mut reader = BufReader::new(reader);
+                                    // register writer in map under the remote socket key (may be ephemeral)
+                                    let key = format!("{}", remote);
+                                    {
+                                        let mut map = pw_map.lock().unwrap();
+                                        map.insert(key.clone(), writer_arc.clone());
+                                    }
                                     let mut line = String::new();
                                     loop {
                                         line.clear();
                                         match reader.read_line(&mut line).await {
                                             Ok(0) => break,
                                             Ok(_) => {
-                                                if let Ok(msg) =
-                                                    serde_json::from_str::<Message>(&line)
-                                                {
+                                                if let Ok(msg) = serde_json::from_str::<Message>(&line) {
                                                     match msg {
                                                         Message::Ping => {
-                                                            let pong = serde_json::to_string(
-                                                                &Message::Pong,
-                                                            )
-                                                            .unwrap()
-                                                                + "\n";
-                                                            if let Err(e) = writer
-                                                                .write_all(pong.as_bytes())
-                                                                .await
+                                                            // respond with Pong using stored writer
+                                                            let pong = serde_json::to_string(&Message::Pong).unwrap() + "\n";
+                                                            let writer_arc_opt = { pw_map.lock().unwrap().get(&key).cloned() };
+                                                            if let Some(w) = writer_arc_opt {
+                                                                if let Ok(mut guard) = w.try_lock() {
+                                                                    if let Err(e) = guard.write_all(pong.as_bytes()).await { println!("Peer write error: {}", e); break; }
+                                                                    if let Err(e) = guard.flush().await { println!("Peer flush error: {}", e); break; }
+                                                                }
+                                                            }
+                                                        }
+                                                        Message::DccRequest { from_ip, from_port, .. } => {
+                                                            // Ensure writer is accessible under the canonical peer key
                                                             {
-                                                                println!("Peer write error: {}", e);
-                                                                break;
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
                                                             }
-                                                            if let Err(e) = writer.flush().await {
-                                                                println!("Peer flush error: {}", e);
-                                                                break;
+                                                            let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                                            let _ = app_handle_incoming.emit("dcc-request", payload);
+                                                        }
+                                                        Message::DccOpened { from_ip, from_port, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
                                                             }
+                                                            let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                                            let _ = app_handle_incoming.emit("dcc-opened", payload);
+                                                        }
+                                                        Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
+                                                            }
+                                                            let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
+                                                            let _ = app_handle_incoming.emit("dcc-file-offer", payload);
+                                                        }
+                                                        Message::FileAccept { from_ip, from_port, name, action, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
+                                                            }
+                                                            let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
+                                                            let _ = app_handle_incoming.emit("dcc-file-accept", payload);
+                                                        }
+                                                        Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
+                                                            }
+                                                            let payload = serde_json::json!({
+                                                                "from_ip": from_ip,
+                                                                "from_port": from_port,
+                                                                "name": name,
+                                                                "offset": offset,
+                                                                "bytes_total": bytes_total,
+                                                                "data_base64": data_base64,
+                                                            });
+                                                            let _ = app_handle_incoming.emit("dcc-file-chunk", payload);
+                                                        }
+                                                        Message::FileCancel { from_ip, from_port, name, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
+                                                            }
+                                                            let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name});
+                                                            let _ = app_handle_incoming.emit("dcc-file-cancel", payload);
+                                                        }
+                                                        Message::DccChat { from_ip, from_port, text, timestamp, .. } => {
+                                                            {
+                                                                let alias = peer_key(&from_ip, from_port);
+                                                                let mut map = pw_map.lock().unwrap();
+                                                                if !map.contains_key(&alias) {
+                                                                    map.insert(alias.clone(), writer_arc.clone());
+                                                                }
+                                                            }
+                                                            let payload = serde_json::json!({
+                                                                "from_ip": from_ip,
+                                                                "from_port": from_port,
+                                                                "text": text,
+                                                                "timestamp": timestamp,
+                                                            });
+                                                            let _ = app_handle_incoming.emit("dcc-chat", payload);
                                                         }
                                                         _ => {}
                                                     }
@@ -145,8 +243,7 @@ async fn connect_to_server(
                                             }
                                         }
                                     }
-                                    let _ = app_handle_incoming
-                                        .emit("peer-incoming-closed", format!("{}", remote));
+                                    let _ = app_handle_incoming.emit("peer-incoming-closed", format!("{}", remote));
                                 });
                             }
                             Err(e) => {
@@ -224,6 +321,22 @@ async fn connect_to_server(
 
                                 // Determine self to skip
                                 let self_opt = { self_info_arc.lock().unwrap().clone() };
+
+                                // Emit enriched client list without auto-connecting to peers (default to disconnected)
+                                let enriched: Vec<EnrichedClientInfo> = clients
+                                    .iter()
+                                    .map(|c| {
+                                        if let Some(ref me) = self_opt {
+                                            if me.ip == c.ip && me.port == c.port {
+                                                return EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "self".to_string() };
+                                            }
+                                        }
+                                        EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "disconnected".to_string() }
+                                    })
+                                    .collect();
+                                let _ = app_handle_clone.emit("client-list-updated", enriched);
+                                // Skip auto-connecting logic to ensure both clients show disconnected on boot
+                                continue;
 
                                 // Connect to peers (outbound) and update statuses
                                 for c in &clients {
@@ -522,6 +635,25 @@ async fn connect_to_server(
                                 let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
                                 let _ = app_handle_clone.emit("dcc-file-accept", payload);
                             }
+                            Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                                let payload = serde_json::json!({
+                                    "from_ip": from_ip,
+                                    "from_port": from_port,
+                                    "name": name,
+                                    "offset": offset,
+                                    "bytes_total": bytes_total,
+                                    "data_base64": data_base64,
+                                });
+                                let _ = app_handle_clone.emit("dcc-file-chunk", payload);
+                            }
+                            Message::FileCancel { from_ip, from_port, name, .. } => {
+                                let payload = serde_json::json!({
+                                    "from_ip": from_ip,
+                                    "from_port": from_port,
+                                    "name": name,
+                                });
+                                let _ = app_handle_clone.emit("dcc-file-cancel", payload);
+                            }
                             _ => {
                                 // Handle other message types if needed
                             }
@@ -593,60 +725,163 @@ fn get_clients(state: State<'_, AppState>) -> Vec<ClientInfo> {
     clients.clone()
 }
 
-#[tauri::command]
-async fn dcc_request(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
-    let tx_opt = state.tx.lock().unwrap().clone();
-    let self_opt = state.self_info.lock().unwrap().clone();
-    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
-    if let Some(tx) = tx_opt {
-        let msg = Message::DccRequest { from_ip, from_port, to_ip, to_port };
-        tx.send(msg).await.map_err(|e| e.to_string())?;
-        Ok("dcc_request sent".into())
+// P2P DCC: peer connection and messaging commands
+fn peer_key(ip: &str, port: u16) -> String { format!("{}:{}", ip, port) }
+
+async fn send_to_peer(state: &State<'_, AppState>, ip: &str, port: u16, msg: &Message) -> Result<(), String> {
+    let key = peer_key(ip, port);
+    let json = serde_json::to_string(msg).map_err(|e| e.to_string())? + "\n";
+    let writer_opt = { state.peer_writers.lock().unwrap().get(&key).cloned() };
+    if let Some(writer_mutex) = writer_opt {
+        let mut guard = writer_mutex.lock().await;
+        guard.write_all(json.as_bytes()).await.map_err(|e| format!("write error: {}", e))?;
+        guard.flush().await.map_err(|e| format!("flush error: {}", e))?;
+        Ok(())
     } else {
-        Err("Not connected to server".into())
+        Err("Peer not connected".into())
     }
 }
 
 #[tauri::command]
-async fn dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
-    let tx_opt = state.tx.lock().unwrap().clone();
-    let self_opt = state.self_info.lock().unwrap().clone();
-    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
-    if let Some(tx) = tx_opt {
-        let msg = Message::DccOpened { from_ip, from_port, to_ip, to_port };
-        tx.send(msg).await.map_err(|e| e.to_string())?;
-        Ok("dcc_opened sent".into())
-    } else {
-        Err("Not connected to server".into())
+async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let addr = format!("{}:{}", to_ip, to_port);
+    let addr_clone = addr.clone();
+    match TcpStream::connect(&addr).await {
+        Ok(stream) => {
+            let (reader, writer) = stream.into_split();
+            // store writer
+            {
+                let mut map = state.peer_writers.lock().unwrap();
+                map.insert(peer_key(&to_ip, to_port), Arc::new(tokio::sync::Mutex::new(writer)));
+            }
+            // spawn reader loop
+            let app_handle_clone = app_handle.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(reader);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            if let Ok(msg) = serde_json::from_str::<Message>(&line) {
+                                match msg {
+                                    Message::Ping => {
+                                        let _ = app_handle_clone.emit("peer-ping", &addr_clone);
+                                    }
+                                    Message::Pong => {
+                                        let _ = app_handle_clone.emit("peer-pong", &addr_clone);
+                                    }
+                                    Message::DccRequest { from_ip, from_port, .. } => {
+                                        let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                        let _ = app_handle_clone.emit("dcc-request", payload);
+                                    }
+                                    Message::DccOpened { from_ip, from_port, .. } => {
+                                        let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                        let _ = app_handle_clone.emit("dcc-opened", payload);
+                                    }
+                                    Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                        let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
+                                        let _ = app_handle_clone.emit("dcc-file-offer", payload);
+                                    }
+                                    Message::FileAccept { from_ip, from_port, name, action, .. } => {
+                                        let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
+                                        let _ = app_handle_clone.emit("dcc-file-accept", payload);
+                                    }
+                                    Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                                        let payload = serde_json::json!({
+                                            "from_ip": from_ip,
+                                            "from_port": from_port,
+                                            "name": name,
+                                            "offset": offset,
+                                            "bytes_total": bytes_total,
+                                            "data_base64": data_base64,
+                                        });
+                                        let _ = app_handle_clone.emit("dcc-file-chunk", payload);
+                                    }
+                                    Message::FileCancel { from_ip, from_port, name, .. } => {
+                                        let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name});
+                                        let _ = app_handle_clone.emit("dcc-file-cancel", payload);
+                                    }
+                                    Message::DccChat { from_ip, from_port, text, timestamp, .. } => {
+                                        let payload = serde_json::json!({
+                                            "from_ip": from_ip,
+                                            "from_port": from_port,
+                                            "text": text,
+                                            "timestamp": timestamp,
+                                        });
+                                        let _ = app_handle_clone.emit("dcc-chat", payload);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let _ = app_handle_clone.emit("peer-outgoing-closed", &addr_clone);
+            });
+            Ok(format!("Connected to peer {}", addr))
+        }
+        Err(e) => Err(format!("peer connect error: {}", e)),
     }
 }
 
 #[tauri::command]
-async fn dcc_file_offer(to_ip: String, to_port: u16, name: String, size: u64, state: State<'_, AppState>) -> Result<String, String> {
-    let tx_opt = state.tx.lock().unwrap().clone();
-    let self_opt = state.self_info.lock().unwrap().clone();
-    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
-    if let Some(tx) = tx_opt {
-        let msg = Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size };
-        tx.send(msg).await.map_err(|e| e.to_string())?;
-        Ok("file_offer sent".into())
-    } else {
-        Err("Not connected to server".into())
-    }
+async fn peer_send_dcc_request(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::DccRequest { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
 }
 
 #[tauri::command]
-async fn dcc_file_accept(to_ip: String, to_port: u16, name: String, action: String, state: State<'_, AppState>) -> Result<String, String> {
-    let tx_opt = state.tx.lock().unwrap().clone();
-    let self_opt = state.self_info.lock().unwrap().clone();
-    let (from_ip, from_port) = if let Some(me) = self_opt { (me.ip, me.port) } else { return Err("Not connected".into()) };
-    if let Some(tx) = tx_opt {
-        let msg = Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action };
-        tx.send(msg).await.map_err(|e| e.to_string())?;
-        Ok("file_accept sent".into())
-    } else {
-        Err("Not connected to server".into())
-    }
+async fn peer_send_dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::DccOpened { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+async fn peer_send_file_offer(to_ip: String, to_port: u16, name: String, size: u64, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::FileOffer { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, size };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+async fn peer_send_file_accept(to_ip: String, to_port: u16, name: String, action: String, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::FileAccept { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, action };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+async fn peer_send_file_chunk(to_ip: String, to_port: u16, name: String, offset: u64, bytes_total: u64, data_base64: String, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::FileChunk { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, offset, bytes_total, data_base64 };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+async fn peer_send_file_cancel(to_ip: String, to_port: u16, name: String, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let msg = Message::FileCancel { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
+}
+
+#[tauri::command]
+async fn peer_send_dcc_chat(to_ip: String, to_port: u16, text: String, state: State<'_, AppState>) -> Result<String, String> {
+    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let msg = Message::DccChat { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, text, timestamp };
+    send_to_peer(&state, &to_ip, to_port, &msg).await?;
+    Ok("sent".into())
 }
 
 #[tauri::command]
@@ -687,6 +922,7 @@ fn main() {
         current_channel: Arc::new(Mutex::new("general".to_string())),
         self_info: Arc::new(Mutex::new(None)),
         peers: Arc::new(Mutex::new(HashMap::new())),
+        peer_writers: Arc::new(Mutex::new(HashMap::new())),
     };
 
     tauri::Builder::default()
@@ -698,10 +934,15 @@ fn main() {
             connect_to_server,
             get_clients,
             send_chat_message,
-            dcc_request,
-            dcc_opened,
-            dcc_file_offer,
-            dcc_file_accept
+            // P2P DCC commands
+            connect_to_peer,
+            peer_send_dcc_request,
+            peer_send_dcc_opened,
+            peer_send_file_offer,
+            peer_send_file_accept,
+            peer_send_file_chunk,
+            peer_send_file_cancel,
+            peer_send_dcc_chat
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

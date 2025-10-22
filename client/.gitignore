@@ -36,3 +36,13 @@ Cargo.lock
 
 # Tauri
 src-tauri/target
+src-tauri/gen/
+
+# Cypress artifacts
+cypress/screenshots/
+cypress/videos/
+cypress/downloads/
+
+# Misc build output
+.dist/
+dist/

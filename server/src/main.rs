@@ -100,6 +100,26 @@ enum Message {
         name: String,
         action: String,
     },
+    // Streaming bytes + control
+    #[serde(rename = "file_chunk")]
+    FileChunk {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        offset: u64,
+        bytes_total: u64,
+        data_base64: String,
+    },
+    #[serde(rename = "file_cancel")]
+    FileCancel {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+    },
 }
 
 type ClientMap = Arc<RwLock<HashMap<SocketAddr, ClientInfo>>>;
@@ -377,34 +397,23 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                             broadcast_message(&writers, &chat_msg, None).await;  // None = include sender
                                         }
                                         Message::DccRequest { from_ip, from_port, to_ip, to_port } => {
-                                            println!("📨 DCC request {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
-                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
-                                                let msg = Message::DccRequest { from_ip, from_port, to_ip, to_port };
-                                                send_to_addr(&writers, target_addr, &msg).await;
-                                            } else {
-                                                println!("⚠️  DCC target not found: {}:{}", to_ip, to_port);
-                                            }
+                                            println!("📨 DCC request received (ignored): {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
+                                            // DCC is not relayed by server.
                                         }
                                         Message::DccOpened { from_ip, from_port, to_ip, to_port } => {
-                                            println!("🪟 DCC opened {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
-                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
-                                                let msg = Message::DccOpened { from_ip, from_port, to_ip, to_port };
-                                                send_to_addr(&writers, target_addr, &msg).await;
-                                            }
+                                            println!("🪟 DCC opened notification (ignored): {}:{} -> {}:{}", from_ip, from_port, to_ip, to_port);
                                         }
                                         Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size } => {
-                                            println!("📁 File offer {}:{} -> {}:{} [{} - {} bytes]", from_ip, from_port, to_ip, to_port, name, size);
-                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
-                                                let msg = Message::FileOffer { from_ip, from_port, to_ip, to_port, name, size };
-                                                send_to_addr(&writers, target_addr, &msg).await;
-                                            }
+                                            println!("📁 File offer (ignored) {}:{} -> {}:{} [{} - {} bytes]", from_ip, from_port, to_ip, to_port, name, size);
                                         }
                                         Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action } => {
-                                            println!("✅ File accept {}:{} -> {}:{} [{} action={}]", from_ip, from_port, to_ip, to_port, name, action);
-                                            if let Some(target_addr) = find_addr_by_ip_port(&clients, &to_ip, to_port).await {
-                                                let msg = Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action };
-                                                send_to_addr(&writers, target_addr, &msg).await;
-                                            }
+                                            println!("✅ File accept (ignored) {}:{} -> {}:{} [{} action={}]", from_ip, from_port, to_ip, to_port, name, action);
+                                        }
+                                        Message::FileChunk { from_ip, from_port, to_ip, to_port, name, offset, bytes_total, data_base64 } => {
+                                            println!("🚚 File chunk (ignored) '{}' {}:{} -> {}:{} (offset {} / total {})", name, from_ip, from_port, to_ip, to_port, offset, bytes_total);
+                                        }
+                                        Message::FileCancel { from_ip, from_port, to_ip, to_port, name } => {
+                                            println!("⛔ File cancel (ignored) '{}' {}:{} -> {}:{}", name, from_ip, from_port, to_ip, to_port);
                                         }
                                         _ => {
                                             // Handle other messages if needed

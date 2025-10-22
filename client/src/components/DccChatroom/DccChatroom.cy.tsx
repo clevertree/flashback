@@ -20,9 +20,9 @@ describe('DccChatroom component', () => {
     cy.contains('Incoming file:').should('exist')
     cy.contains('test.mp4').should('exist')
 
-    // Buttons should be disabled until a URL is available
-    cy.contains('button','Open with OS').should('be.disabled')
-    cy.contains('button','Save to OS').should('be.disabled')
-    cy.contains('button','Playback').should('be.disabled')
+    // Buttons should be enabled to allow accepting and queuing actions even before a URL is available
+    cy.contains('button','Open with OS').should('not.be.disabled')
+    cy.contains('button','Save to OS').should('not.be.disabled')
+    cy.contains('button','Playback').should('not.be.disabled')
   })
 })

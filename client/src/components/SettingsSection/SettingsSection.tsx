@@ -4,15 +4,23 @@ import React from "react";
 export interface SettingsSectionProps {
     navSide: NavSide
     autoPlayMedia: boolean
+    connectOnStartup: boolean
+    autoReconnectPeers: boolean
     onChangeNavSide: (side: NavSide) => void
     onToggleAutoPlay: (val: boolean) => void
+    onToggleConnectOnStartup: (val: boolean) => void
+    onToggleAutoReconnectPeers: (val: boolean) => void
 }
 
 export default function SettingsSection({
                                             navSide,
                                             autoPlayMedia,
+                                            connectOnStartup,
+                                            autoReconnectPeers,
                                             onChangeNavSide,
-                                            onToggleAutoPlay
+                                            onToggleAutoPlay,
+                                            onToggleConnectOnStartup,
+                                            onToggleAutoReconnectPeers
                                         }: SettingsSectionProps) {
     return (
         <section id="settings" className="bg-gray-800 rounded-lg p-6 shadow-lg mt-8">
@@ -42,6 +50,22 @@ export default function SettingsSection({
                                onChange={(e) => onToggleAutoPlay(e.target.checked)}/>
                         Auto-play media streams
                     </label>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-medium mb-2">Connectivity</h3>
+                    <div className="flex flex-col gap-2 text-sm">
+                        <label className="inline-flex items-center gap-2">
+                            <input type="checkbox" checked={connectOnStartup}
+                                   onChange={(e) => onToggleConnectOnStartup(e.target.checked)} />
+                            Connect to server on startup
+                        </label>
+                        <label className="inline-flex items-center gap-2">
+                            <input type="checkbox" checked={autoReconnectPeers}
+                                   onChange={(e) => onToggleAutoReconnectPeers(e.target.checked)} />
+                            Auto re-connect to known peers
+                        </label>
+                    </div>
                 </div>
             </div>
         </section>
