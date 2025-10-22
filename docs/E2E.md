@@ -41,3 +41,20 @@ Notes
 - The test will automatically skip if APP_PATH/TAURI_RUNNER or TAURI_DRIVER_PORT are not provided.
 - Running multiple `tauri dev` instances may reuse the same frontend dev server; this generally works but a built binary is more deterministic for E2E.
 - For CI, prefer building the app in a prior step, starting tauri-driver as a service, then running `npm run e2e` in client.
+
+Quick run scripts (per-OS)
+- Windows (PowerShell):
+  scripts\e2e-win.ps1             # uses runner by default
+  scripts\e2e-win.ps1 -Build      # build app binary and use APP_PATH
+- macOS:
+  chmod +x scripts/e2e-macos.sh && scripts/e2e-macos.sh         # runner
+  chmod +x scripts/e2e-macos.sh && scripts/e2e-macos.sh --build  # build binary
+- Linux:
+  chmod +x scripts/e2e-linux.sh && scripts/e2e-linux.sh          # runner
+  chmod +x scripts/e2e-linux.sh && scripts/e2e-linux.sh --build  # build binary
+
+Notes
+- Scripts will try to install tauri-driver via `cargo install tauri-driver` if not present (requires Rust).
+- Runner mode starts `tauri dev` via TAURI_RUNNER/TAURI_RUNNER_ARGS; build mode sets APP_PATH to a debug binary.
+- See details below for the underlying manual steps if you prefer to run them yourself.
+

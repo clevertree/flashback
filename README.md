@@ -211,3 +211,19 @@ End-to-end (E2E) testing (Tauri-centered)
 Notes
 - Windows paths in docs use backslashes.
 - The server binds to the first available port in 8080–8085 unless you pass a custom port. Our E2E harness spawns it on port 0 and parses the bound port from stdout.
+
+
+E2E quick-run scripts
+- Windows (PowerShell):
+  scripts\e2e-win.ps1             # uses runner by default
+  scripts\e2e-win.ps1 -Build      # build binary and use APP_PATH
+- macOS:
+  chmod +x scripts/e2e-macos.sh && scripts/e2e-macos.sh         # runner
+  chmod +x scripts/e2e-macos.sh && scripts/e2e-macos.sh --build  # build binary
+- Linux:
+  chmod +x scripts/e2e-linux.sh && scripts/e2e-linux.sh          # runner
+  chmod +x scripts/e2e-linux.sh && scripts/e2e-linux.sh --build  # build binary
+
+Notes:
+- Scripts will attempt to install tauri-driver via cargo if available; otherwise print guidance.
+- Runner mode starts `tauri dev`; build mode compiles a debug binary and sets APP_PATH.
