@@ -194,3 +194,20 @@ npm run tauri build
 
 The built application will be in `client/src-tauri/target/release/bundle/`
 # flashback
+
+# Flashback
+
+This repository contains a Rust TCP server and a Tauri (Next.js) desktop client.
+
+Quick start
+- Server: cd server && cargo run
+- Client (desktop): cd client && npm run tauri:dev
+
+End-to-end (E2E) testing (Tauri-centered)
+- We use WebdriverIO + tauri-driver for E2E. Cypress e2e is deprecated (component tests may remain).
+- See docs/E2E.md for setup and running instructions.
+- Run: cd client && npm run e2e (after installing prerequisites and starting tauri-driver).
+
+Notes
+- Windows paths in docs use backslashes.
+- The server binds to the first available port in 8080–8085 unless you pass a custom port. Our E2E harness spawns it on port 0 and parses the bound port from stdout.

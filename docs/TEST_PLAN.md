@@ -33,7 +33,9 @@ Implementation approach:
 - Add integration tests under `server/tests/`.
 - For now, keep them `#[ignore]` until we finalize the spawn/port plumbing; they document the acceptance criteria and are easy to enable.
 
-## Client (Tauri/Next.js + Cypress Component Tests)
+## Client (Tauri/Next.js)
+
+E2E: Use WebdriverIO + tauri-driver (Tauri-centered). Component tests may continue to use Cypress in isolation.
 
 Scope:
 - Temp file writing target: when saving/“open with OS”, `.part` is created in OS temp or configured `tempDir`.
