@@ -14,10 +14,10 @@ const env = {
 new FlashbackServerStack(app, 'FlashbackServerStack', {
   env,
   // Provide defaults; allow overrides via context/CLI
-  instanceType: app.node.tryGetContext('instanceType') || 't3.small',
-  sshCidr: app.node.tryGetContext('sshCidr') || '0.0.0.0/0',
-  repoUrl: app.node.tryGetContext('repoUrl') || 'https://github.com/your-user/flashback.git',
-  branch: app.node.tryGetContext('branch') || 'main',
   serverPort: Number(app.node.tryGetContext('serverPort') || 51111),
-  keyName: app.node.tryGetContext('keyName'), // optional existing EC2 key pair name
+  ecrRepoName: app.node.tryGetContext('ecrRepoName') || 'flashback-server',
+  imageTag: app.node.tryGetContext('imageTag') || 'latest',
+  desiredCount: Number(app.node.tryGetContext('desiredCount') || 1),
+  cpu: Number(app.node.tryGetContext('cpu') || 256),
+  memoryMiB: Number(app.node.tryGetContext('memoryMiB') || 512),
 });
