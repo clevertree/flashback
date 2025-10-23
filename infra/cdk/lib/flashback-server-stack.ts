@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as elbv2Targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 
 export interface FlashbackServerStackProps extends cdk.StackProps {
   instanceType?: string; // e.g., t3.small
@@ -102,14 +103,12 @@ systemctl restart flashback-server
       detailedMonitoring: true,
     });
 
-    // Configure spot instance options
+    // Configure Spot capacity via low-level override (typing varies by CDK version)
     const cfnInstance = instance.node.defaultChild as ec2.CfnInstance;
-    cfnInstance.instanceMarketOptions = {
+    (cfnInstance as any).instanceMarketOptions = {
       marketType: 'spot',
-      spotOptions: {
-        spotInstanceType: 'one-time',
-      },
-    } as any;
+      spotOptions: { spotInstanceType: 'one-time' },
+    };
 
     instance.addUserData(userDataScript);
 
@@ -133,7 +132,7 @@ systemctl restart flashback-server
       targetType: elbv2.TargetType.INSTANCE,
       healthCheck: { protocol: elbv2.Protocol.TCP },
     });
-    tg.addTarget(instance);
+    tg.addTarget(new elbv2Targets.InstanceTarget(instance, props.serverPort));
 
     new elbv2.NetworkListener(this, 'FlashbackListener', {
       loadBalancer: nlb,
