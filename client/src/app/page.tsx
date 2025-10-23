@@ -14,6 +14,7 @@ import ConnectionForm from "@components/ConnectionForm/ConnectionForm";
 import ClientsList, {ClientInfo} from "@components/ClientsList/ClientsList";
 import ChatSection, {ChatMessage} from "@components/ChatSection/ChatSection";
 import ErrorBoundary from "@components/ErrorBoundary/ErrorBoundary";
+import LogsSection from "@components/LogsSection/LogsSection";
 
 export default function Home() {
   const [serverIp, setServerIp] = useState('server.flashbackrepository.org')
@@ -44,10 +45,13 @@ export default function Home() {
   const [offeredFiles, setOfferedFiles] = useState<Record<string, File>>({})
   const [onlineClients, setOnlineClients] = useState<ClientInfo[]>([])
   const [onlineKeys, setOnlineKeys] = useState<Set<string>>(new Set())
+  const [logs, setLogs] = useState<string[]>([])
 
   useEffect(() => {
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
     setClientPort(randomPort.toString())
+
+    const addLog = (line: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  ${line}`])
 
     const unlisten = listen<ClientInfo[]>('client-list-updated', (event) => {
       try {
@@ -62,14 +66,20 @@ export default function Home() {
       setConnected(false)
       setStatus('Disconnected from server')
       setError('Server disconnected')
+      addLog('Server disconnected')
     })
 
     const unlistenError = listen<string>('server-error', (event) => {
       setError(`Server error: ${event.payload}`)
+      addLog(`Server error: ${event.payload}`)
     })
 
     const unlistenChat = listen<ChatMessage>('chat-message', (event) => {
       setChatMessages((prev) => [...prev, event.payload])
+    })
+
+    const unlistenLog = listen<string>('log', (event) => {
+      addLog(event.payload)
     })
 
     return () => {
@@ -77,6 +87,7 @@ export default function Home() {
       unlistenDisconnect.then((f) => f())
       unlistenError.then((f) => f())
       unlistenChat.then((f) => f())
+      unlistenLog.then((f) => f())
     }
   }, [])
 
@@ -218,18 +229,29 @@ export default function Home() {
   const handleConnect = async () => {
     setError('')
     setStatus('Connecting...')
+    setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  UI: Connecting...`])
 
     const attempts = 3
-    const delayMs = 5000
+    const timeoutMs = 15000
+
+    const invokeWithTimeout = async <T,>(ms: number, cmd: string, args?: Record<string, any>) => {
+      return await Promise.race<T>([
+        invoke<T>(cmd, args as any),
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms)) as any,
+      ])
+    }
 
     for (let i = 1; i <= attempts; i++) {
       try {
-        const result = await invoke<string>('connect_to_server', {
+        setStatus(`Connecting... (attempt ${i}/${attempts})`)
+        setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  UI: Attempt ${i}/${attempts} to ${serverIp}:${serverPort}`])
+        const result = await invokeWithTimeout<string>(timeoutMs, 'connect_to_server', {
           server: `${serverIp}:${serverPort}`,
         })
 
         setConnected(true)
         setStatus(result)
+        setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  ${result}`])
 
         // Fetch initial client list as a fallback to ensure UI sync
         try {
@@ -240,17 +262,21 @@ export default function Home() {
         } catch {}
         return
       } catch (err) {
-        setError(`${err}`)
+        const msg = `${err}`
+        setError(msg)
         setStatus(`Connection attempt ${i}/${attempts} failed`)
+        setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  UI: attempt ${i} failed: ${msg}`])
         setConnected(false)
         if (i < attempts) {
-          await new Promise(res => setTimeout(res, delayMs))
+          // short delay between attempts to avoid hot loop
+          await new Promise(res => setTimeout(res, 300))
           setStatus(`Retrying... (${i + 1}/${attempts})`)
         }
       }
     }
 
     setStatus('All connection attempts failed')
+    setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  UI: All connection attempts failed`])
   }
 
   const handleSendMessage = async () => {
@@ -353,6 +379,7 @@ export default function Home() {
               { label: 'Clients', onClick: () => scrollTo('clients') },
               { label: 'Video', onClick: () => scrollTo('video') },
               { label: 'Settings', onClick: () => scrollTo('settings') },
+              { label: 'Logs', onClick: () => scrollTo('logs') },
               { label: 'Instructions', onClick: () => scrollTo('instructions') },
             ]}
           />
@@ -371,6 +398,7 @@ export default function Home() {
                 { label: 'Clients', onClick: () => scrollTo('clients') },
                 { label: 'Video', onClick: () => scrollTo('video') },
                 { label: 'Settings', onClick: () => scrollTo('settings') },
+                { label: 'Logs', onClick: () => scrollTo('logs') },
                 { label: 'Instructions', onClick: () => scrollTo('instructions') },
               ]}
             />
@@ -490,6 +518,10 @@ export default function Home() {
               onToggleConnectOnStartup={setConnectOnStartup}
               onToggleAutoReconnectPeers={setAutoReconnectPeers}
             />
+          </ErrorBoundary>
+
+          <ErrorBoundary name="LogsSection">
+            <LogsSection logs={logs} />
           </ErrorBoundary>
 
           <ErrorBoundary name="InstructionsSection">

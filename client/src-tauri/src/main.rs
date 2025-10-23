@@ -339,13 +339,23 @@ async fn connect_to_server(
     }
 
     println!("Connecting to server at {}", addr);
+    let _ = app_handle.emit("log", format!("Connecting to server at {}", addr));
 
-    // Connect to server
-    let stream = TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
+    // Connect to server with 15s timeout
+    let stream = match tokio::time::timeout(Duration::from_secs(15), TcpStream::connect(&addr)).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            let _ = app_handle.emit("log", format!("Failed to connect: {}", e));
+            return Err(format!("Failed to connect: {}", e));
+        }
+        Err(_) => {
+            let _ = app_handle.emit("log", "Connect timeout after 15s".to_string());
+            return Err("Connect timeout after 15s".to_string());
+        }
+    };
 
     println!("Connected to server");
+    let _ = app_handle.emit("log", format!("Connected to {}", addr));
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -383,6 +393,7 @@ async fn connect_to_server(
                 Ok(0) => {
                     println!("Server disconnected");
                     let _ = app_handle_clone.emit("server-disconnected", ());
+                    let _ = app_handle_clone.emit("log", "Server disconnected".to_string());
                     break;
                 }
                 Ok(_) => {
