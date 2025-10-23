@@ -167,7 +167,7 @@ $ npm run tauri:dev:auto
 
 ```
 ┌─────────────────────────────────────────────┐
-│ Client Server App                      [_][□][X]│
+│ Flashback                      [_][□][X]│
 ├─────────────────────────────────────────────┤
 │                                             │
 │  Connection Settings                        │

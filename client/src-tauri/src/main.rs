@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Keep Windows console visible (do not hide in release) to support CLI mode
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1006,9 +1006,19 @@ fn run_cli(app: tauri::App) {
         print!("> ");
         let _ = io::stdout().flush();
         line.clear();
-        if io::stdin().read_line(&mut line).is_err() {
-            println!("Failed to read input. Exiting.");
-            break;
+        match io::stdin().read_line(&mut line) {
+            Ok(0) => {
+                // EOF reached (e.g., stdin closed). Stay alive and keep waiting unless user exits explicitly.
+                // Sleep a bit to avoid busy loop when stdin is closed.
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                continue;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                println!("Input error: {}. Type 'exit' to quit (continuing).", e);
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                continue;
+            }
         }
         let input = line.trim();
         if input.is_empty() { continue; }

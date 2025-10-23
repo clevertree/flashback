@@ -12,8 +12,8 @@
       "icons/icon.png"
     ]
   },
-  "productName": "Client Server App",
-  "mainBinaryName": "Client Server App",
+  "productName": "Flashback",
+  "mainBinaryName": "Flashback",
   "version": "0.1.0",
   "identifier": "com.clientserver.desktop",
   "plugins": {},
@@ -23,7 +23,7 @@
       {
         "fullscreen": false,
         "resizable": true,
-        "title": "Client Server App",
+        "title": "Flashback",
         "width": 800,
         "height": 600,
         "useHttpsScheme": true,
