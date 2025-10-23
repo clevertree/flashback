@@ -227,3 +227,52 @@ E2E quick-run scripts
 Notes:
 - Scripts will attempt to install tauri-driver via cargo if available; otherwise print guidance.
 - Runner mode starts `tauri dev`; build mode compiles a debug binary and sets APP_PATH.
+
+
+
+## DNS: Pointing server.flashbackrepository.org to AWS NLB (Fargate)
+
+If your DNS is managed by Vercel (recommended for this project), use a CNAME record to point the subdomain to the Network Load Balancer DNS name output by the CDK stack.
+
+- Prerequisites: The stack must be deployed; capture the output `NlbDnsName`, e.g. `Flashb-Flash-3cFlwMFvY1qU-ce5bf79341c3f349.elb.us-east-1.amazonaws.com` and port `51111`.
+- In Vercel > Domains > flashbackrepository.org > DNS, add:
+  - Type: CNAME
+  - Name: server
+  - Value: <NLB_DNS_NAME_FROM_OUTPUT>
+  - TTL: 60 (or your preferred value)
+- Wait for DNS to propagate. You can verify resolution:
+  - dig +short server.flashbackrepository.org
+  - nslookup server.flashbackrepository.org
+  - nc -vz server.flashbackrepository.org 51111
+
+Notes:
+- This service is TCP, not HTTP. A CNAME works for subdomains. For apex domains (@), use ALIAS/ANAME or Route53 alias. If you need static IPs for A records, allocate Elastic IPs on the NLB subnets (update the CDK accordingly) and create A records to those EIPs.
+- TLS termination is not configured in this project (plain TCP). If you need TLS, consider an NLB TLS listener with a certificate (ACM) and update the client accordingly.
+
+## Remote CLI End-to-End Test
+
+A simple CLI E2E script connects a client to the deployed server via DNS, sends a message, and exits.
+
+Usage:
+
+- Default host and port:
+  scripts/cli-e2e-remote.sh
+
+- Custom host/port:
+  scripts/cli-e2e-remote.sh server.flashbackrepository.org 51111
+  # or
+  HOST=server.flashbackrepository.org PORT=51111 scripts/cli-e2e-remote.sh
+
+Artifacts:
+- Logs: wdio-logs/cli-e2e-remote.log
+
+This script builds the CLI client (debug), issues these commands to the client process, and validates expected output:
+- connect-server <host:port>
+- allow auto
+- send-channel general <timestamped-message>
+- exit
+
+Troubleshooting:
+- Ensure DNS resolves to the NLB DNS target (dig/nslookup)
+- Ensure the NLB listener is active and the ECS task is healthy (AWS console)
+- Check CloudWatch Logs for the ECS task (streamPrefix: flashback)
