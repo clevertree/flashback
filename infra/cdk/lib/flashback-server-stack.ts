@@ -120,7 +120,7 @@ systemctl restart flashback-server
     // Allocate and associate an Elastic IP
     const eip = new ec2.CfnEIP(this, 'FlashbackEip');
     new ec2.CfnEIPAssociation(this, 'FlashbackEipAssociation', {
-      eip: eip.ref,
+      allocationId: eip.attrAllocationId,
       instanceId: instance.instanceId,
     });
 
@@ -133,7 +133,7 @@ systemctl restart flashback-server
     new route53.ARecord(this, 'FlashbackARecord', {
       zone,
       recordName: props.recordName, // e.g., server
-      target: route53.RecordTarget.fromIpAddresses(eip.ref),
+      target: route53.RecordTarget.fromIpAddresses(eip.attrPublicIp),
       ttl: cdk.Duration.minutes(1),
     });
 
