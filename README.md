@@ -295,3 +295,76 @@ Notes:
 Validation tips:
 - Watch the service Desired tasks/Running tasks in the ECS console; it should drop to 0 after idle, and go to 1 when you try to connect.
 - Generate traffic to trigger scale out: nc -vz server.flashbackrepository.org 51111 (repeat a couple times if needed).
+
+
+
+## Troubleshooting: CDK deploy fails with AlreadyExists ScalableTarget
+
+If `cdk deploy` fails with an error like:
+
+Resource of type 'AWS::ApplicationAutoScaling::ScalableTarget' with identifier 'service/FlashbackServerStack-FlashbackCluster.../FlashbackServerStack-FlashbackService...' already exists.
+
+This means a legacy Application Auto Scaling target/policy (from a previous ECS service name) is lingering. We stabilized names to `service/flashback-cluster/flashback-svc`, which avoids future collisions. To clean up the legacy target in us-east-1 and redeploy:
+
+Quick cleanup script:
+
+```bash
+# OLD_RESOURCE_ID is the value shown in the error (copy the whole service/... string)
+export OLD_RESOURCE_ID='service/FlashbackServerStack-FlashbackClusterA8268E97-GzFmQgtelggI/FlashbackServerStack-FlashbackService23399868-BH8R49HOhGnS'
+
+scripts/cleanup-autoscaling.sh "$OLD_RESOURCE_ID" us-east-1
+```
+
+Manual steps (equivalent):
+
+```bash
+export AWS_REGION=us-east-1
+export STACK=FlashbackServerStack
+export OLD_RESOURCE_ID='service/FlashbackServerStack-FlashbackClusterA8268E97-GzFmQgtelggI/FlashbackServerStack-FlashbackService23399868-BH8R49HOhGnS'
+
+aws cloudformation describe-stack-resources \
+  --stack-name "$STACK" \
+  --query "StackResources[?ResourceType=='AWS::ApplicationAutoScaling::ScalableTarget'].[LogicalResourceId,PhysicalResourceId,ResourceStatus]" \
+  --output table \
+  --region $AWS_REGION
+
+aws application-autoscaling describe-scaling-policies \
+  --service-namespace ecs \
+  --region $AWS_REGION \
+  --query "ScalingPolicies[?ResourceId==\`$OLD_RESOURCE_ID\`].[PolicyName,ResourceId]" \
+  --output table
+
+for p in $(aws application-autoscaling describe-scaling-policies \
+  --service-namespace ecs \
+  --region $AWS_REGION \
+  --query "ScalingPolicies[?ResourceId==\`$OLD_RESOURCE_ID\`].PolicyName" \
+  --output text); do
+  aws application-autoscaling delete-scaling-policy \
+    --service-namespace ecs \
+    --resource-id "$OLD_RESOURCE_ID" \
+    --scalable-dimension ecs:service:DesiredCount \
+    --policy-name "$p" \
+    --region $AWS_REGION;
+done
+
+aws application-autoscaling deregister-scalable-target \
+  --service-namespace ecs \
+  --resource-id "$OLD_RESOURCE_ID" \
+  --scalable-dimension ecs:service:DesiredCount \
+  --region $AWS_REGION || true
+```
+
+Then redeploy (stable names already set in the CDK):
+
+```bash
+cd infra/cdk
+npm ci
+npx cdk deploy --require-approval never \
+  -c ecrRepoName=flashback-server \
+  -c imageTag=latest \
+  -c serverPort=51111
+```
+
+Validate:
+- nc -vz server.flashbackrepository.org 51111
+- scripts/cli-e2e-remote.sh
