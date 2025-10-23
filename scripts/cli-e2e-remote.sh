@@ -56,6 +56,11 @@ log "Connecting to ${HOST}:${PORT}..."
 echo "connect-server ${HOST}:${PORT}" > "$IN_FIFO"
 wait_for "$LOG_FILE" "Connected to ${HOST}:${PORT}" 20
 
+# Request user list explicitly per new protocol
+log "Requesting user list"
+echo "users" > "$IN_FIFO"
+wait_for "$LOG_FILE" "Received client list|Requested client list" 20 || true
+
 # Optionally enable auto-allow (if the client supports it)
 echo "allow auto" > "$IN_FIFO" || true
 sleep 0.2

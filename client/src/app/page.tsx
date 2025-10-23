@@ -253,13 +253,12 @@ export default function Home() {
         setStatus(result)
         setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}  ${result}`])
 
-        // Fetch initial client list as a fallback to ensure UI sync
+        // Request the current client list from server per new protocol
         try {
-          const initial = await invoke<any>('get_clients')
-          if (Array.isArray(initial)) {
-            setClients(initial as any)
-          }
-        } catch {}
+          await invoke<string>('request_client_list')
+        } catch (e) {
+          console.warn('Failed to request client list:', e)
+        }
         return
       } catch (err) {
         const msg = `${err}`

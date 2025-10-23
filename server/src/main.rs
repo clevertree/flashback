@@ -55,6 +55,8 @@ enum Message {
     },
     #[serde(rename = "client_list")]
     ClientList { clients: Vec<ClientInfo> },
+    #[serde(rename = "client_list_request")]
+    ClientListRequest, 
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "pong")]
@@ -303,13 +305,8 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                         );
                     }
 
-                    // Broadcast updated client list to all clients
-                    broadcast_client_list(&clients, &writers).await;
-
-                    // Send initial client list to this client
-                    if let Err(e) = send_client_list(&writer, &clients).await {
-                        println!("❌ Error sending client list: {}", e);
-                    }
+                    // Broadcast updated client list to all clients except the newly registered one
+                    broadcast_client_list(&clients, &writers, Some(socket_addr)).await;
 
                     // Keep connection alive and handle pings
                     line.clear();
@@ -330,7 +327,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                 // Client sent a message
                                 if let Ok(msg) = serde_json::from_str::<Message>(&line) {
                                     match msg {
-                                        Message::Ping => {
+                                        Message::Ping => { 
                                             // Update last ping time
                                             if let Some(info) = clients.read().await.get(&socket_addr) {
                                                 *info.last_ping.write().await = Utc::now();
@@ -342,6 +339,11 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                                 let mut writer_lock = writer.lock().await;
                                                 let _ = writer_lock.write_all((json + "\n").as_bytes()).await;
                                                 let _ = writer_lock.flush().await;
+                                            }
+                                        }
+                                        Message::ClientListRequest => {
+                                            if let Err(e) = send_client_list(&writer, &clients).await {
+                                                println!("❌ Error sending client list on request: {}", e);
                                             }
                                         }
                                         Message::Chat { from_ip, from_port, message, timestamp, channel } => {
@@ -417,7 +419,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
     }
 
     // Broadcast updated client list
-    broadcast_client_list(&clients, &writers).await;
+    broadcast_client_list(&clients, &writers, None).await;
 }
 
 async fn send_client_list(
@@ -439,7 +441,7 @@ async fn send_client_list(
     Ok(())
 }
 
-async fn broadcast_client_list(clients: &ClientMap, writers: &WriterMap) {
+async fn broadcast_client_list(clients: &ClientMap, writers: &WriterMap, exclude: Option<SocketAddr>) {
     let clients_lock = clients.read().await;
     let client_list: Vec<ClientInfo> = clients_lock.values().cloned().collect();
 

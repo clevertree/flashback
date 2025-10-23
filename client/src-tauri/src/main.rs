@@ -42,6 +42,8 @@ enum Message {
     Register { client_ip: String, client_port: u16 },
     #[serde(rename = "client_list")]
     ClientList { clients: Vec<ClientInfo> },
+    #[serde(rename = "client_list_request")]
+    ClientListRequest, 
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "pong")]
@@ -830,6 +832,7 @@ fn main() {
             .invoke_handler(tauri::generate_handler![
                 connect_to_server,
                 get_clients,
+                request_client_list,
                 send_chat_message,
                 connect_to_peer,
                 peer_send_dcc_request,
@@ -860,6 +863,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             connect_to_server,
             get_clients,
+            request_client_list,
             send_chat_message,
             // P2P DCC commands
             connect_to_peer,
@@ -888,6 +892,8 @@ fn print_cli_help() {
     println!("                       Connect to a peer client (DCC)");
     println!("  send-channel <channel> <message>");
     println!("                       Send a message to a server channel");
+    println!("  users");
+    println!("                       Request the current user list from the server");
     println!("  send-client <peer:port> <text>");
     println!("                       Send a direct message to a peer client (DCC chat)");
     println!("  allow                Approve the pending incoming chat/transfer request");
@@ -993,6 +999,14 @@ fn run_cli(app: tauri::App) {
                 let fut = send_chat_message(message, channel, client_ip, client_port, st);
                 match async_runtime::block_on(fut) {
                     Ok(msg) => println!("{}", msg),
+                    Err(e) => println!("Error: {}", e),
+                }
+            }
+            "users" => {
+                let st = state.clone();
+                let fut = request_client_list(st);
+                match async_runtime::block_on(fut) {
+                    Ok(_) => println!("Requested client list"),
                     Err(e) => println!("Error: {}", e),
                 }
             }
@@ -1143,4 +1157,18 @@ fn emit_enriched_client_list(
         .collect();
 
     let _ = app_handle.emit("client-list-updated", enriched);
+}
+
+
+#[tauri::command]
+async fn request_client_list(state: State<'_, AppState>) -> Result<String, String> {
+    let tx_opt = state.tx.lock().unwrap().clone();
+    if let Some(tx) = tx_opt {
+        tx.send(Message::ClientListRequest)
+            .await
+            .map_err(|e| format!("Failed to request client list: {}", e))?;
+        Ok("requested".into())
+    } else {
+        Err("Not connected to server".into())
+    }
 }
