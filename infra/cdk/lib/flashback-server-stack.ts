@@ -59,7 +59,7 @@ export class FlashbackServerStack extends cdk.Stack {
     });
 
     // ECS Cluster
-    const cluster = new ecs.Cluster(this, 'FlashbackCluster', { vpc });
+    const cluster = new ecs.Cluster(this, 'FlashbackCluster', { vpc, clusterName: 'flashback-cluster' });
 
     // Task definition
     const cpu = props.cpu ?? 256; // 0.25 vCPU
@@ -83,6 +83,7 @@ export class FlashbackServerStack extends cdk.Stack {
     // Fargate Service
     const service = new ecs.FargateService(this, 'FlashbackService', {
       cluster,
+      serviceName: 'flashback-svc',
       taskDefinition: taskDef,
       desiredCount: props.desiredCount ?? 1,
       assignPublicIp: true,
