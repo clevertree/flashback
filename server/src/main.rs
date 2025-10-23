@@ -25,6 +25,7 @@ struct ServerSettings {
     #[serde(default = "default_connection_timeout")]
     connection_timeout: u64,
     #[serde(default = "default_host")]
+    #[allow(dead_code)]
     host: String,
     #[serde(default = "default_max_clients")]
     max_clients: usize,
@@ -409,7 +410,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                         Message::FileAccept { from_ip, from_port, to_ip, to_port, name, action } => {
                                             println!("✅ File accept (ignored) {}:{} -> {}:{} [{} action={}]", from_ip, from_port, to_ip, to_port, name, action);
                                         }
-                                        Message::FileChunk { from_ip, from_port, to_ip, to_port, name, offset, bytes_total, data_base64 } => {
+                                        Message::FileChunk { from_ip, from_port, to_ip, to_port, name, offset, bytes_total, data_base64: _ } => {
                                             println!("🚚 File chunk (ignored) '{}' {}:{} -> {}:{} (offset {} / total {})", name, from_ip, from_port, to_ip, to_port, offset, bytes_total);
                                         }
                                         Message::FileCancel { from_ip, from_port, to_ip, to_port, name } => {
@@ -553,6 +554,7 @@ async fn broadcast_message(writers: &WriterMap, message: &Message, exclude: Opti
     }
 }
 
+#[allow(dead_code)]
 async fn find_addr_by_ip_port(clients: &ClientMap, ip: &str, port: u16) -> Option<SocketAddr> {
     let clients_lock = clients.read().await;
     for (addr, info) in clients_lock.iter() {
@@ -563,6 +565,7 @@ async fn find_addr_by_ip_port(clients: &ClientMap, ip: &str, port: u16) -> Optio
     None
 }
 
+#[allow(dead_code)]
 async fn send_to_addr(writers: &WriterMap, addr: SocketAddr, message: &Message) {
     let json = match serde_json::to_string(message) {
         Ok(j) => j + "\n",

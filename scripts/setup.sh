@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd "$(dirname "$0")"
+
 set -e
 
 echo "=================================================="
@@ -150,7 +152,7 @@ echo ""
 
 # Install client dependencies
 echo "📦 Installing client dependencies..."
-cd client
+cd "$(dirname "$0")/../client"
 npm install
 
 if [ $? -ne 0 ]; then

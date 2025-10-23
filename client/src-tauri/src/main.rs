@@ -30,6 +30,7 @@ struct EnrichedClientInfo {
     peer_status: String,
 }
 
+#[allow(dead_code)]
 struct PeerConn {
     status: PeerStatus,
 }
@@ -69,13 +70,33 @@ enum Message {
     FileCancel { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String },
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+enum RequestKind {
+    DccChat,
+    FileOffer { name: String, size: u64 },
+}
+
+struct PendingRequest {
+    ip: String,
+    port: u16,
+    kind: RequestKind,
+}
+
 struct AppState {
     clients: Arc<Mutex<Vec<ClientInfo>>>,
     tx: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
+    #[allow(dead_code)]
     current_channel: Arc<Mutex<String>>,
     self_info: Arc<Mutex<Option<ClientInfo>>>,
+    #[allow(dead_code)]
     peers: Arc<Mutex<HashMap<String, PeerConn>>>, // key: "ip:port"
     peer_writers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>>>>, // key: "ip:port" -> writer
+    // CLI approval flow state
+    cli_mode: Arc<Mutex<bool>>,
+    cli_auto_allow: Arc<Mutex<bool>>,
+    allowed_peers: Arc<Mutex<std::collections::HashSet<String>>>,
+    pending_request: Arc<Mutex<Option<PendingRequest>>>,
 }
 
 #[tauri::command]
@@ -119,10 +140,10 @@ async fn connect_to_server(
             println!("👂 Peer listener started at {}", print_addr);
             let pw_map = app_handle_clone.state::<AppState>().peer_writers.clone();
             let app_handle_outer = app_handle_clone.clone();
-            let mut listener = listener; // move into task
+            let listener = listener; // move into task
             loop {
                 match listener.accept().await {
-                    Ok((mut stream, remote)) => {
+                    Ok((stream, remote)) => {
                         println!("🔗 Incoming peer connection from {}", remote);
                         let app_handle_incoming = app_handle_outer.clone();
                         // capture peer_writers map
@@ -160,6 +181,31 @@ async fn connect_to_server(
                                                         let mut map = pw_map.lock().unwrap();
                                                         if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
                                                     }
+                                                    // CLI approval gating
+                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
+                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    if cli_mode {
+                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let key = peer_key(&from_ip, from_port);
+                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        if !already {
+                                                            if auto {
+                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                println!("Auto-allowed DCC chat request from {}:{}", from_ip, from_port);
+                                                                // Optionally notify opened
+                                                                let _ = app_handle_incoming.emit("dcc-opened", serde_json::json!({"ip": from_ip, "port": from_port}));
+                                                            } else {
+                                                                // set pending request
+                                                                {
+                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
+                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                                                }
+                                                                println!("Incoming DCC chat request from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
+                                                                // Do not emit to app/UI until allowed
+                                                                continue;
+                                                            }
+                                                        }
+                                                    }
                                                     let payload = serde_json::json!({"ip": from_ip, "port": from_port});
                                                     let _ = app_handle_incoming.emit("dcc-request", payload);
                                                 }
@@ -177,6 +223,27 @@ async fn connect_to_server(
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
                                                         if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                    }
+                                                    // CLI approval gating for file offer
+                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
+                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    if cli_mode {
+                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let key = peer_key(&from_ip, from_port);
+                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        if !already {
+                                                            if auto {
+                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                println!("Auto-allowed file offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
+                                                            } else {
+                                                                {
+                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
+                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::FileOffer { name: name.clone(), size } });
+                                                                }
+                                                                println!("Incoming file offer from {}:{} -- '{}' ({} bytes)\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port, name, size);
+                                                                continue;
+                                                            }
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
                                                     let _ = app_handle_incoming.emit("dcc-file-offer", payload);
@@ -220,6 +287,27 @@ async fn connect_to_server(
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
                                                         if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                    }
+                                                    // CLI approval gating for DCC chat message
+                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
+                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    if cli_mode {
+                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let key = peer_key(&from_ip, from_port);
+                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        if !already {
+                                                            if auto {
+                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                println!("Auto-allowed DCC chat from {}:{}", from_ip, from_port);
+                                                            } else {
+                                                                {
+                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
+                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                                                }
+                                                                println!("Incoming DCC chat from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
+                                                                continue;
+                                                            }
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({
                                                         "from_ip": from_ip,
@@ -281,7 +369,6 @@ async fn connect_to_server(
     // Spawn task to handle incoming messages
     let app_handle_clone = app_handle.clone();
     let state_clients = Arc::clone(&state.clients);
-    let state_peers = Arc::clone(&state.peers);
     let self_info_arc = Arc::clone(&state.self_info);
     tokio::spawn(async move {
         let mut line = String::new();
@@ -297,7 +384,18 @@ async fn connect_to_server(
                     if let Ok(msg) = serde_json::from_str::<Message>(&line) {
                         match msg {
                             Message::ClientList { clients } => {
-                                println!("Received client list: {} clients", clients.len());
+                                // In CLI mode, print full client list for visibility
+                                let print_details = {
+                                    let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                    let val = *st.cli_mode.lock().unwrap();
+                                    val
+                                };
+                                if print_details {
+                                    let list_str = clients.iter().map(|c| format!("{}:{}", c.ip, c.port)).collect::<Vec<_>>().join(", ");
+                                    println!("Received client list ({}): {}", clients.len(), list_str);
+                                } else {
+                                    println!("Received client list: {} clients", clients.len());
+                                }
                                 // Save latest server-provided list
                                 {
                                     let mut state_clients = state_clients.lock().unwrap();
@@ -323,259 +421,6 @@ async fn connect_to_server(
                                 // Skip auto-connecting logic to ensure both clients show disconnected on boot
                                 continue;
 
-                                // Connect to peers (outbound) and update statuses
-                                for c in &clients {
-                                    if let Some(ref me) = self_opt {
-                                        if me.ip == c.ip && me.port == c.port {
-                                            continue;
-                                        }
-                                    }
-                                    let key = format!("{}:{}", c.ip, c.port);
-                                    let mut need_connect = false;
-                                    {
-                                        let mut peers = state_peers.lock().unwrap();
-                                        match peers.get(&key) {
-                                            Some(pc) => match pc.status {
-                                                PeerStatus::Disconnected => {
-                                                    need_connect = true;
-                                                }
-                                                PeerStatus::Connecting | PeerStatus::Connected => {}
-                                            },
-                                            None => {
-                                                peers.insert(
-                                                    key.clone(),
-                                                    PeerConn {
-                                                        status: PeerStatus::Connecting,
-                                                    },
-                                                );
-                                                need_connect = true;
-                                            }
-                                        }
-                                    }
-
-                                    if need_connect {
-                                        let key_clone = key.clone();
-                                        let state_peers_clone = Arc::clone(&state_peers);
-                                        let app_handle_pe = app_handle_clone.clone();
-                                        let state_clients_clone = Arc::clone(&state_clients);
-                                        let self_info_arc_clone = Arc::clone(&self_info_arc);
-                                        let target = format!("{}:{}", c.ip, c.port);
-                                        tokio::spawn(async move {
-                                            let connect_target = target.clone();
-                                            println!("➡️ Connecting to peer {}", connect_target);
-                                            match TcpStream::connect(&connect_target).await {
-                                                Ok(stream) => {
-                                                    println!(
-                                                        "✅ Connected to peer {}",
-                                                        connect_target
-                                                    );
-                                                    {
-                                                        let mut peers =
-                                                            state_peers_clone.lock().unwrap();
-                                                        if let Some(pc) = peers.get_mut(&key_clone)
-                                                        {
-                                                            pc.status = PeerStatus::Connected;
-                                                        }
-                                                    }
-                                                    let _ = app_handle_pe.emit(
-                                                        "peer-status-updated",
-                                                        &connect_target,
-                                                    );
-                                                    // Also emit refreshed client list so UI updates direct status immediately
-                                                    emit_enriched_client_list(
-                                                        &app_handle_pe,
-                                                        &state_clients_clone,
-                                                        &state_peers_clone,
-                                                        &self_info_arc_clone,
-                                                    );
-                                                    // Split and spawn reader + heartbeat
-                                                    let (reader, mut writer) = stream.into_split();
-                                                    let mut reader = BufReader::new(reader);
-                                                    // Heartbeat ticker
-                                                    let mut ping_interval =
-                                                        interval(Duration::from_secs(60));
-                                                    let ping_target = connect_target.clone();
-                                                    tokio::spawn(async move {
-                                                        loop {
-                                                            if ping_interval
-                                                                .tick()
-                                                                .await
-                                                                .elapsed()
-                                                                .is_zero()
-                                                            { /* noop */
-                                                            }
-                                                            let ping = serde_json::to_string(
-                                                                &Message::Ping,
-                                                            )
-                                                            .unwrap()
-                                                                + "\n";
-                                                            if let Err(e) = writer
-                                                                .write_all(ping.as_bytes())
-                                                                .await
-                                                            {
-                                                                println!(
-                                                                    "Peer ping write error {}: {}",
-                                                                    ping_target, e
-                                                                );
-                                                                break;
-                                                            }
-                                                            if let Err(e) = writer.flush().await {
-                                                                println!(
-                                                                    "Peer ping flush error {}: {}",
-                                                                    ping_target, e
-                                                                );
-                                                                break;
-                                                            }
-                                                            println!(
-                                                                "💓 Sent ping to peer {}",
-                                                                ping_target
-                                                            );
-                                                        }
-                                                    });
-                                                    // Reader loop: respond to pings and observe pongs
-                                                    let reader_target = connect_target.clone();
-                                                    let state_peers_clone_reader =
-                                                        state_peers_clone.clone();
-                                                    let app_handle_pe_reader =
-                                                        app_handle_pe.clone();
-                                                    let key_clone_reader = key_clone.clone();
-                                                    let state_clients_clone_reader =
-                                                        state_clients_clone.clone();
-                                                    let self_info_arc_clone_reader =
-                                                        self_info_arc_clone.clone();
-                                                    tokio::spawn(async move {
-                                                        let mut line = String::new();
-                                                        loop {
-                                                            line.clear();
-                                                            match reader.read_line(&mut line).await
-                                                            {
-                                                                Ok(0) => {
-                                                                    println!(
-                                                                        "Peer {} closed",
-                                                                        reader_target
-                                                                    );
-                                                                    break;
-                                                                }
-                                                                Ok(_) => {
-                                                                    if let Ok(msg) =
-                                                                        serde_json::from_str::<
-                                                                            Message,
-                                                                        >(
-                                                                            &line
-                                                                        )
-                                                                    {
-                                                                        match msg {
-                                                                            Message::Ping => {}
-                                                                            Message::Pong => {
-                                                                                println!("💓 Received pong from peer {}", reader_target);
-                                                                            }
-                                                                            _ => {}
-                                                                        }
-                                                                    }
-                                                                }
-                                                                Err(e) => {
-                                                                    println!(
-                                                                        "Peer {} read error: {}",
-                                                                        reader_target, e
-                                                                    );
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                        // Mark disconnected
-                                                        let mut peers = state_peers_clone_reader
-                                                            .lock()
-                                                            .unwrap();
-                                                        if let Some(pc) =
-                                                            peers.get_mut(&key_clone_reader)
-                                                        {
-                                                            pc.status = PeerStatus::Disconnected;
-                                                        }
-                                                        let _ = app_handle_pe_reader.emit(
-                                                            "peer-status-updated",
-                                                            &reader_target,
-                                                        );
-                                                        // Also emit refreshed client list so UI updates direct status immediately
-                                                        emit_enriched_client_list(
-                                                            &app_handle_pe_reader,
-                                                            &state_clients_clone_reader,
-                                                            &state_peers_clone_reader,
-                                                            &self_info_arc_clone_reader,
-                                                        );
-                                                    });
-                                                }
-                                                Err(e) => {
-                                                    println!(
-                                                        "❌ Failed to connect to peer {}: {}",
-                                                        connect_target, e
-                                                    );
-                                                    let mut peers =
-                                                        state_peers_clone.lock().unwrap();
-                                                    if let Some(pc) = peers.get_mut(&key_clone) {
-                                                        pc.status = PeerStatus::Disconnected;
-                                                    } else {
-                                                        peers.insert(
-                                                            key_clone,
-                                                            PeerConn {
-                                                                status: PeerStatus::Disconnected,
-                                                            },
-                                                        );
-                                                    }
-                                                    let _ = app_handle_pe.emit(
-                                                        "peer-status-updated",
-                                                        &connect_target,
-                                                    );
-                                                    // Also emit refreshed client list so UI updates direct status immediately
-                                                    emit_enriched_client_list(
-                                                        &app_handle_pe,
-                                                        &state_clients_clone,
-                                                        &state_peers_clone,
-                                                        &self_info_arc_clone,
-                                                    );
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-
-                                // Build enriched list with peer status for UI
-                                let enriched: Vec<EnrichedClientInfo> = clients
-                                    .iter()
-                                    .map(|c| {
-                                        if let Some(ref me) = self_opt {
-                                            if me.ip == c.ip && me.port == c.port {
-                                                return EnrichedClientInfo {
-                                                    ip: c.ip.clone(),
-                                                    port: c.port,
-                                                    peer_status: "self".to_string(),
-                                                };
-                                            }
-                                        }
-                                        let key = format!("{}:{}", c.ip, c.port);
-                                        let status_str = {
-                                            let peers = state_peers.lock().unwrap();
-                                            match peers.get(&key).map(|pc| pc.status.clone()) {
-                                                Some(PeerStatus::Connected) => {
-                                                    "connected".to_string()
-                                                }
-                                                Some(PeerStatus::Connecting) => {
-                                                    "connecting".to_string()
-                                                }
-                                                Some(PeerStatus::Disconnected) => {
-                                                    "disconnected".to_string()
-                                                }
-                                                None => "disconnected".to_string(),
-                                            }
-                                        };
-                                        EnrichedClientInfo {
-                                            ip: c.ip.clone(),
-                                            port: c.port,
-                                            peer_status: status_str,
-                                        }
-                                    })
-                                    .collect();
-
-                                let _ = app_handle_clone.emit("client-list-updated", enriched);
                             }
                             Message::Pong => {
                                 println!("💓 Received pong from server");
@@ -601,6 +446,27 @@ async fn connect_to_server(
                                 let _ = app_handle_clone.emit("chat-message", chat_data);
                             }
                             Message::DccRequest { from_ip, from_port, .. } => {
+                                // CLI approval gating
+                                let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                let is_cli = { *st.cli_mode.lock().unwrap() };
+                                if is_cli {
+                                    let auto = { *st.cli_auto_allow.lock().unwrap() };
+                                    let key = peer_key(&from_ip, from_port);
+                                    let already = { st.allowed_peers.lock().unwrap().contains(&key) };
+                                    if !already {
+                                        if auto {
+                                            st.allowed_peers.lock().unwrap().insert(key.clone());
+                                            println!("Auto-allowed DCC chat request from {}:{}", from_ip, from_port);
+                                        } else {
+                                            {
+                                                let mut pend = st.pending_request.lock().unwrap();
+                                                *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                            }
+                                            println!("Incoming DCC chat request from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
+                                            continue;
+                                        }
+                                    }
+                                }
                                 println!("📨 DCC request received from {}:{}", from_ip, from_port);
                                 let payload = serde_json::json!({"ip": from_ip, "port": from_port});
                                 let _ = app_handle_clone.emit("dcc-request", payload);
@@ -611,6 +477,27 @@ async fn connect_to_server(
                                 let _ = app_handle_clone.emit("dcc-opened", payload);
                             }
                             Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                // CLI approval gating
+                                let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                let is_cli = { *st.cli_mode.lock().unwrap() };
+                                if is_cli {
+                                    let auto = { *st.cli_auto_allow.lock().unwrap() };
+                                    let key = peer_key(&from_ip, from_port);
+                                    let already = { st.allowed_peers.lock().unwrap().contains(&key) };
+                                    if !already {
+                                        if auto {
+                                            st.allowed_peers.lock().unwrap().insert(key.clone());
+                                            println!("Auto-allowed file offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
+                                        } else {
+                                            {
+                                                let mut pend = st.pending_request.lock().unwrap();
+                                                *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::FileOffer { name: name.clone(), size } });
+                                            }
+                                            println!("Incoming file offer from {}:{} -- '{}' ({} bytes)\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port, name, size);
+                                            continue;
+                                        }
+                                    }
+                                }
                                 println!("📁 File offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
                                 let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
                                 let _ = app_handle_clone.emit("dcc-file-offer", payload);
@@ -909,6 +796,10 @@ fn main() {
         self_info: Arc::new(Mutex::new(None)),
         peers: Arc::new(Mutex::new(HashMap::new())),
         peer_writers: Arc::new(Mutex::new(HashMap::new())),
+        cli_mode: Arc::new(Mutex::new(false)),
+        cli_auto_allow: Arc::new(Mutex::new(false)),
+        allowed_peers: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        pending_request: Arc::new(Mutex::new(None)),
     };
 
     let args: Vec<String> = std::env::args().collect();
@@ -935,6 +826,11 @@ fn main() {
             ])
             .build(tauri::generate_context!())
             .expect("failed to build tauri app for CLI mode");
+        {
+            let st: tauri::State<AppState> = app.state::<AppState>();
+            let mut flag = st.cli_mode.lock().unwrap();
+            *flag = true;
+        }
         run_cli(app);
         return;
     }
@@ -978,6 +874,9 @@ fn print_cli_help() {
     println!("                       Send a message to a server channel");
     println!("  send-client <peer:port> <text>");
     println!("                       Send a direct message to a peer client (DCC chat)");
+    println!("  allow                Approve the pending incoming chat/transfer request");
+    println!("  allow auto           Auto-approve all incoming chats/transfers for this session");
+    println!("  deny                 Reject the pending incoming chat/transfer request");
     println!("  quit | exit          Exit the CLI");
 }
 
@@ -1097,6 +996,83 @@ fn run_cli(app: tauri::App) {
                     Err(_) => println!("Usage: send-client <peer:port> <text>"),
                 }
             }
+            "allow" => {
+                // Check if user typed 'allow auto'
+                if let Some(next) = parts.next() {
+                    if next == "auto" {
+                        {
+                            let mut flag = state.cli_auto_allow.lock().unwrap();
+                            *flag = true;
+                        }
+                        // Also approve any pending request
+                        let pending = { state.pending_request.lock().unwrap().take() };
+                        if let Some(p) = pending {
+                            let key = peer_key(&p.ip, p.port);
+                            state.allowed_peers.lock().unwrap().insert(key);
+                            match p.kind {
+                                RequestKind::DccChat => {
+                                    let st = state.clone();
+                                    let fut = peer_send_dcc_opened(p.ip, p.port, st);
+                                    let _ = async_runtime::block_on(fut);
+                                }
+                                RequestKind::FileOffer { name, .. } => {
+                                    let st = state.clone();
+                                    let fut = peer_send_file_accept(p.ip, p.port, name, "accept".to_string(), st);
+                                    let _ = async_runtime::block_on(fut);
+                                }
+                            }
+                        }
+                        println!("Auto-allow enabled.");
+                        continue;
+                    }
+                }
+                // Normal allow: approve current pending
+                let pending = { state.pending_request.lock().unwrap().take() };
+                if let Some(p) = pending {
+                    let key = peer_key(&p.ip, p.port);
+                    state.allowed_peers.lock().unwrap().insert(key);
+                    match p.kind {
+                        RequestKind::DccChat => {
+                            let st = state.clone();
+                            let fut = peer_send_dcc_opened(p.ip, p.port, st);
+                            match async_runtime::block_on(fut) {
+                                Ok(_) => println!("DCC chat approved."),
+                                Err(e) => println!("Failed to notify DCC opened: {}", e),
+                            }
+                        }
+                        RequestKind::FileOffer { name, .. } => {
+                            let st = state.clone();
+                            let fut = peer_send_file_accept(p.ip, p.port, name, "accept".to_string(), st);
+                            match async_runtime::block_on(fut) {
+                                Ok(_) => println!("File offer accepted."),
+                                Err(e) => println!("Failed to send file accept: {}", e),
+                            }
+                        }
+                    }
+                } else {
+                    println!("No pending request to allow.");
+                }
+            }
+            "deny" => {
+                let pending = { state.pending_request.lock().unwrap().take() };
+                if let Some(p) = pending {
+                    match p.kind {
+                        RequestKind::DccChat => {
+                            println!("DCC chat denied from {}:{}.", p.ip, p.port);
+                        }
+                        RequestKind::FileOffer { name, .. } => {
+                            let st = state.clone();
+                            let fut = peer_send_file_accept(p.ip.clone(), p.port, name.clone(), "reject".to_string(), st);
+                            match async_runtime::block_on(fut) {
+                                Ok(_) => println!("File offer rejected."),
+                                Err(e) => println!("Failed to send file reject: {}", e),
+                            }
+                        }
+                    }
+                } else {
+                    println!("No pending request to deny.");
+                }
+            }
             other => {
                 println!("Unknown command: {}", other);
                 println!("Type 'help' to see available commands.");
@@ -1106,6 +1082,7 @@ fn run_cli(app: tauri::App) {
 }
 
 // Helper to emit the enriched client list using current peers map and self info
+#[allow(dead_code)]
 fn emit_enriched_client_list(
     app_handle: &tauri::AppHandle,
     state_clients: &Arc<Mutex<Vec<ClientInfo>>>,
