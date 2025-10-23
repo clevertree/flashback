@@ -37,14 +37,14 @@ export default function ConnectionForm(props: ConnectionFormProps) {
 
             <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                    <label className="block text-sm font-medium mb-2">Server IP Address</label>
+                    <label className="block text-sm font-medium mb-2">Server Hostname</label>
                     <input
                         type="text"
                         value={serverIp}
                         onChange={(e) => setServerIp(e.target.value)}
                         disabled={connected}
                         className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                        placeholder="127.0.0.1"
+                        placeholder="server.flashbackrepository.org"
                     />
                 </div>
                 <div>
@@ -55,7 +55,7 @@ export default function ConnectionForm(props: ConnectionFormProps) {
                         onChange={(e) => setServerPort(e.target.value)}
                         disabled={connected}
                         className="w-full px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-                        placeholder="8080"
+                        placeholder="51111"
                     />
                 </div>
             </div>

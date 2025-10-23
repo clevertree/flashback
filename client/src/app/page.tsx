@@ -16,8 +16,8 @@ import ChatSection, {ChatMessage} from "@components/ChatSection/ChatSection";
 import ErrorBoundary from "@components/ErrorBoundary/ErrorBoundary";
 
 export default function Home() {
-  const [serverIp, setServerIp] = useState('127.0.0.1')
-  const [serverPort, setServerPort] = useState('8080')
+  const [serverIp, setServerIp] = useState('server.flashbackrepository.org')
+  const [serverPort, setServerPort] = useState('51111')
   const [clientIp, setClientIp] = useState('127.0.0.1')
   const [clientPort, setClientPort] = useState('')
   const [connected, setConnected] = useState(false)
@@ -225,10 +225,7 @@ export default function Home() {
     for (let i = 1; i <= attempts; i++) {
       try {
         const result = await invoke<string>('connect_to_server', {
-          serverIp,
-          serverPort: parseInt(serverPort),
-          clientIp,
-          clientPort: parseInt(clientPort),
+          server: `${serverIp}:${serverPort}`,
         })
 
         setConnected(true)
@@ -399,10 +396,6 @@ export default function Home() {
             <h1 className="text-3xl font-bold">Junie IRC Client</h1>
           </div>
 
-          <ErrorBoundary name="VideoPlayerSection">
-            <VideoPlayerSection autoPlay={autoPlayMedia} source={videoSrc} />
-          </ErrorBoundary>
-
           <ErrorBoundary name="ConnectionForm">
             <ConnectionForm
               serverIp={serverIp}
@@ -501,6 +494,10 @@ export default function Home() {
 
           <ErrorBoundary name="InstructionsSection">
             <InstructionsSection />
+          </ErrorBoundary>
+
+          <ErrorBoundary name="VideoPlayerSection">
+            <VideoPlayerSection autoPlay={autoPlayMedia} source={videoSrc} />
           </ErrorBoundary>
       </main>
 

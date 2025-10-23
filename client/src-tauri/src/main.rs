@@ -101,12 +101,17 @@ struct AppState {
 
 #[tauri::command]
 async fn connect_to_server(
-    server: String,
+    server: Option<String>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    // Determine server:port, defaulting to deployed endpoint if missing
+    let server_str = match server {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => "server.flashbackrepository.org:51111".to_string(),
+    };
     // Parse server:port
-    let (server_ip, server_port) = parse_host_port(&server)?;
+    let (server_ip, server_port) = parse_host_port(&server_str)?;
     let addr = format!("{}:{}", server_ip, server_port);
 
     // Detect local client IP
@@ -938,7 +943,7 @@ fn run_cli(app: tauri::App) {
                 }
                 let ah = app_handle.clone();
                 let st = state.clone();
-                let fut = connect_to_server(server, st, ah);
+                let fut = connect_to_server(Some(server), st, ah);
                 match async_runtime::block_on(fut) {
                     Ok(msg) => println!("{}", msg),
                     Err(e) => println!("Error: {}", e),
