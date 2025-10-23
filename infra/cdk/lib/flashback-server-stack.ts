@@ -1,13 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as route53 from 'aws-cdk-lib/aws-route53';
-import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 
 export interface FlashbackServerStackProps extends cdk.StackProps {
-  hostedZoneId: string;
-  domainName: string;
-  recordName: string; // e.g., "server"
   instanceType?: string; // e.g., t3.small
   sshCidr?: string; // e.g., 0.0.0.0/0
   repoUrl: string;
@@ -124,20 +120,29 @@ systemctl restart flashback-server
       instanceId: instance.instanceId,
     });
 
-    // Route53 record
-    const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
-      hostedZoneId: props.hostedZoneId,
-      zoneName: props.domainName,
+    // Network Load Balancer to provide a stable DNS name (no Route53 required)
+    const nlb = new elbv2.NetworkLoadBalancer(this, 'FlashbackNlb', {
+      vpc,
+      internetFacing: true,
     });
 
-    new route53.ARecord(this, 'FlashbackARecord', {
-      zone,
-      recordName: props.recordName, // e.g., server
-      target: route53.RecordTarget.fromIpAddresses(eip.attrPublicIp),
-      ttl: cdk.Duration.minutes(1),
+    const tg = new elbv2.NetworkTargetGroup(this, 'FlashbackTg', {
+      vpc,
+      port: props.serverPort,
+      protocol: elbv2.Protocol.TCP,
+      targetType: elbv2.TargetType.INSTANCE,
+      healthCheck: { protocol: elbv2.Protocol.TCP },
+    });
+    tg.addTarget(instance);
+
+    new elbv2.NetworkListener(this, 'FlashbackListener', {
+      loadBalancer: nlb,
+      port: props.serverPort,
+      protocol: elbv2.Protocol.TCP,
+      defaultTargetGroups: [tg],
     });
 
-    new cdk.CfnOutput(this, 'PublicDnsName', { value: `${props.recordName}.${props.domainName}` });
+    new cdk.CfnOutput(this, 'NlbDnsName', { value: nlb.loadBalancerDnsName });
     new cdk.CfnOutput(this, 'ServerPort', { value: props.serverPort.toString() });
   }
 }

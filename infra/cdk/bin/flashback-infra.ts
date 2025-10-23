@@ -14,9 +14,6 @@ const env = {
 new FlashbackServerStack(app, 'FlashbackServerStack', {
   env,
   // Provide defaults; allow overrides via context/CLI
-  hostedZoneId: app.node.tryGetContext('hostedZoneId') || 'Z123EXAMPLE',
-  domainName: app.node.tryGetContext('domainName') || 'flashbackrepository.org',
-  recordName: app.node.tryGetContext('recordName') || 'server',
   instanceType: app.node.tryGetContext('instanceType') || 't3.small',
   sshCidr: app.node.tryGetContext('sshCidr') || '0.0.0.0/0',
   repoUrl: app.node.tryGetContext('repoUrl') || 'https://github.com/your-user/flashback.git',
