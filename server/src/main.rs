@@ -31,7 +31,7 @@ struct ServerSettings {
     max_clients: usize,
 }
 
-fn default_port() -> u16 { 8080 }
+fn default_port() -> u16 { 51111 }
 fn default_heartbeat_interval() -> u64 { 60 }
 fn default_connection_timeout() -> u64 { 120 }
 fn default_host() -> String { "0.0.0.0".to_string() }
@@ -139,75 +139,34 @@ async fn main() {
     println!("   Max clients: {}", config.server.max_clients);
     println!("");
     
-    // Check for custom port from command line arguments
+    // Determine server port: CLI arg takes precedence over config
     let args: Vec<String> = env::args().collect();
-    let custom_port = if args.len() > 1 {
+    let selected_port = if args.len() > 1 {
         match args[1].parse::<u16>() {
             Ok(port) => {
                 println!("🎯 Using custom port: {}", port);
-                Some(port)
+                port
             }
             Err(_) => {
                 eprintln!("❌ Invalid port number: {}", args[1]);
-                eprintln!("💡 Usage: cargo run [port]");
-                eprintln!("   Example: cargo run 9090");
+                eprintln!("💡 Usage: server [port]");
+                eprintln!("   Example: server 51111");
                 std::process::exit(1);
             }
         }
     } else {
-        None
+        config.server.port
     };
 
-    // Try multiple ports if configured port is in use
-    let ports = if let Some(port) = custom_port {
-        vec![port]
-    } else {
-        vec![config.server.port, 8081, 8082, 8083, 8084, 8085]
-    };
-    
-    let mut listener = None;
-    let mut bound_addr = String::new();
-
-    for port in &ports {
-        let addr = format!("0.0.0.0:{}", port);
-        match TcpListener::bind(&addr).await {
-            Ok(l) => {
-                println!("✅ Successfully bound to {}", addr);
-                bound_addr = addr.clone();
-                listener = Some(l);
-                break;
-            }
-            Err(e) => {
-                if custom_port.is_some() {
-                    eprintln!("❌ Failed to bind to {}: {}", addr, e);
-                    eprintln!("💡 Port {} is already in use", port);
-                    eprintln!("   Find what's using it: lsof -i :{}", port);
-                    eprintln!("   Try a different port: cargo run -- <port>");
-                    std::process::exit(1);
-                }
-                if *port == config.server.port {
-                    println!("⚠️  Port {} is in use, trying next port...", port);
-                } else {
-                    println!("⚠️  Port {} is in use, trying next port...", port);
-                }
-            }
+    let bind_addr = format!("0.0.0.0:{}", selected_port);
+    let listener = match TcpListener::bind(&bind_addr).await {
+        Ok(l) => {
+            println!("✅ Successfully bound to {}", bind_addr);
+            l
         }
-    }
-
-    let listener = match listener {
-        Some(l) => l,
-        None => {
-            eprintln!("❌ Failed to bind to any port. All ports 8080-8085 are in use.");
-            eprintln!("");
-            eprintln!("💡 To fix this:");
-            eprintln!("   1. Find the process using port 8080:");
-            eprintln!("      lsof -i :8080");
-            eprintln!("");
-            eprintln!("   2. Kill it (replace <PID> with the actual process ID):");
-            eprintln!("      kill -9 <PID>");
-            eprintln!("");
-            eprintln!("   3. Or use a custom port:");
-            eprintln!("      cargo run -- 9090");
+        Err(e) => {
+            eprintln!("❌ Failed to bind to {}: {}", bind_addr, e);
+            eprintln!("💡 Ensure the port is free or choose a different one: server <port>");
             std::process::exit(1);
         }
     };

@@ -1,0 +1,60 @@
+name: Deploy Flashback Server
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.SSH_KEY }}
+
+      - name: Add known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+
+      - name: Deploy via SSH (git pull + restart service)
+        run: |
+          ssh -o StrictHostKeyChecking=yes $SSH_USER@$SSH_HOST <<'EOF'
+            set -euxo pipefail
+            sudo systemctl stop flashback-server || true
+            if [ -d /opt/flashback/repo/.git ]; then
+              cd /opt/flashback/repo
+              git fetch origin ${BRANCH}
+              git checkout ${BRANCH}
+              git reset --hard origin/${BRANCH}
+            else
+              sudo mkdir -p /opt/flashback
+              sudo chown $USER:$USER /opt/flashback
+              git clone --branch ${BRANCH} ${REPO_URL} /opt/flashback/repo
+              cd /opt/flashback/repo
+            fi
+            cd server
+            cargo build --release
+            sudo systemctl daemon-reload
+            sudo systemctl restart flashback-server
+          EOF
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          BRANCH: master
+
+      - name: Verify service is listening
+        run: |
+          ssh $SSH_USER@$SSH_HOST 'sudo ss -ltnp | grep ":${PORT} " || sudo ss -ltnp'
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          PORT: 51111

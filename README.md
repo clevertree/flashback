@@ -55,7 +55,7 @@ source $HOME/.cargo/env
 ```bash
 cd server
 cargo run
-# Server will start on port 8080
+# Server will start on port 51111 (or use: cargo run -- <port>)
 ```
 
 ### 3. Start the Client(s)
@@ -83,7 +83,7 @@ Each client will automatically find an available port! See `MULTIPLE_CLIENTS_SOL
 ## Features
 
 - **Server**:
-  - TCP server listening on port 8080 (auto-selects 8081-8085 if busy)
+  - TCP server listening on port 51111 (configurable via config.toml or CLI arg)
   - Maintains list of connected clients (IP + port)
   - Broadcasts client list to all connected clients
   - Handles client disconnections gracefully
@@ -105,12 +105,12 @@ Each client will automatically find an available port! See `MULTIPLE_CLIENTS_SOL
 ## Configuration
 
 ### Server
-Edit `server/src/main.rs` to change the server port (default: 8080)
+You can set the server port in `config.toml` (default: 51111). You can also override via CLI: `server <port>`.
 
 ### Client
-The client UI allows you to configure:
-- Server IP address (default: 127.0.0.1)
-- Server port (default: 8080)
+The client allows you to configure:
+- Server host/IP (e.g., 127.0.0.1)
+- Server port (e.g., 51111)
 
 ## Protocol
 
@@ -210,7 +210,7 @@ End-to-end (E2E) testing (Tauri-centered)
 
 Notes
 - Windows paths in docs use backslashes.
-- The server binds to the first available port in 8080–8085 unless you pass a custom port. Our E2E harness spawns it on port 0 and parses the bound port from stdout.
+- The server listens on a single default port 51111 unless you pass a custom port or set it in config.toml.
 
 
 E2E quick-run scripts
