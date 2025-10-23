@@ -1,5 +1,12 @@
 import { expect } from 'chai'
 import { spawnServer } from '../utils/spawnServer'
+import { spawnSync } from 'node:child_process'
+
+// TODO(e2e-types): This spec still has TypeScript typing rough edges related to WebdriverIO multiremote and the
+// global `browser` type. We currently rely on type casts to WebdriverIO.MultiRemoteBrowser for getInstance calls.
+// Follow-up: refine types by installing/updating @wdio/types and configuring tsconfig/test types, or by introducing
+// a typed helper wrapper to safely obtain instances A/B without casts.
+// Reference: docs/E2E.md and docs/TEST_PLAN.md for the intended multiremote flow.
 
 // WDIO multiremote provides two instances: browserA and browserB (names driven by capabilities keys).
 // In TypeScript with multiremote, the global "browser" is a MultiRemoteBrowser, but we can access instances via
@@ -10,6 +17,14 @@ function skipIfNotReady() {
   const driverPort = process.env.TAURI_DRIVER_PORT || '4551'
   if (!hasAppPath) return `Missing APP_PATH or TAURI_RUNNER env; set up tauri-driver to launch the app.`
   if (!driverPort) return `Missing TAURI_DRIVER_PORT.`
+  // Ensure Rust cargo is available to run the server used by tests
+  try {
+    const cargoCmd = process.platform === 'win32' ? 'cargo.exe' : 'cargo'
+    const res = spawnSync(cargoCmd, ['--version'], { stdio: 'ignore' })
+    if (res.status !== 0) return 'Rust cargo not found; install Rust toolchain to run server for E2E tests.'
+  } catch {
+    return 'Rust cargo not found; install Rust toolchain to run server for E2E tests.'
+  }
   return ''
 }
 

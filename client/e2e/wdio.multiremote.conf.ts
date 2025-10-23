@@ -1,5 +1,10 @@
 import type { Options } from '@wdio/types'
 import path from 'node:path'
+import { createRequire } from 'node:module'
+
+// TODO(e2e-types): Capabilities typing is currently using `any` inside tauriCaps to work around gaps in WDIO v9
+// multiremote + tauri-driver typing. Tighten these types and validate against actual capabilities once the E2E
+// environment is stabilized. Consider extracting a shared type for 'tauri:options'.
 
 // NOTE: This is a scaffold for running Tauri E2E tests via tauri-driver using WebdriverIO multiremote.
 // It is intentionally conservative: if prerequisites are not available (driver/app), tests should be skipped.
@@ -19,7 +24,8 @@ const APP_PATH = process.env.APP_PATH || ''
 
 // Helper: Tauri capabilities understood by tauri-driver
 function tauriCaps(instanceName: string) {
-  const caps: any = {
+  // Build W3C compliant WebDriver capabilities for multiremote usage in WDIO v9
+  const alwaysMatch: any = {
     browserName: 'wry',
     'tauri:options': {
       application: APP_PATH, // if empty, tests should skip in spec
@@ -35,10 +41,17 @@ function tauriCaps(instanceName: string) {
       instanceName,
     },
   }
-  return caps
+
+  return {
+    capabilities: {
+      // WDIO expects a W3C caps structure when using the WebDriver protocol in multiremote
+      alwaysMatch,
+      firstMatch: [{}],
+    },
+  } as any
 }
 
-export const config: Options.MultiRemoteConfig = {
+export const config = {
   runner: 'local',
   specs: [
     path.resolve(__dirname, 'specs', 'basic.interaction.e2e.ts'),
@@ -48,7 +61,7 @@ export const config: Options.MultiRemoteConfig = {
   framework: 'mocha',
   mochaOpts: {
     timeout: 120000,
-    require: ['ts-node/register'],
+    require: [createRequire(import.meta.url).resolve('ts-node/register')],
   },
   reporters: ['spec'],
   automationProtocol: 'webdriver',

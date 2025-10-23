@@ -1,0 +1,118 @@
+2025-10-23T12:35:20.699Z INFO @wdio/local-runner: Run worker command: run
+2025-10-23T12:35:21.997Z WARN @wdio/mocha-framework: Unable to load spec files quite likely because they rely on `browser` object that is not fully initialized.
+`browser` object has only `capabilities` and some flags like `isMobile`.
+Helper files that use other `browser` commands have to be moved to `before` hook.
+Spec file(s): file:///C:/Users/kado/dev/flashback/client/e2e/specs/basic.interaction.e2e.ts
+Error: TSError: ⨯ Unable to compile TypeScript:
+e2e/specs/basic.interaction.e2e.ts(2,62): error TS7006: Parameter 'target' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,69): error TS7006: Parameter 'value' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1031): error TS7034: Variable 'server' implicitly has type 'any' in some locations where its type cannot be determined.
+e2e/specs/basic.interaction.e2e.ts(2,1190): error TS7005: Variable 'server' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1285): error TS7005: Variable 'server' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1325): error TS2304: Cannot find name 'browser'.
+e2e/specs/basic.interaction.e2e.ts(2,1364): error TS2304: Cannot find name 'browser'.
+e2e/specs/basic.interaction.e2e.ts(2,1487): error TS7006: Parameter 'drv' implicitly has an 'any' type.
+
+    at createTSError (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:859:12)
+    at reportTSError (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:863:19)
+    at getOutput (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1077:36)
+    at Object.compile (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1433:41)
+    at Module.m._compile (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1617:30)
+    at transformer (C:\Users\kado\dev\flashback\client\node_modules\tsx\dist\register-D46fvsV_.cjs:3:1104)
+    at Object.require.extensions.<computed> [as .ts] (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+2025-10-23T12:35:22.003Z INFO webdriver: Initiate new session using the WebDriver protocol
+2025-10-23T12:35:22.004Z INFO @wdio/utils: Connecting to existing driver at http://127.0.0.1:4551/
+2025-10-23T12:35:22.013Z INFO webdriver: [POST] http://127.0.0.1:4551/session
+2025-10-23T12:35:22.022Z INFO webdriver: Initiate new session using the WebDriver protocol
+2025-10-23T12:35:22.022Z INFO @wdio/utils: Connecting to existing driver at http://127.0.0.1:4551/
+2025-10-23T12:35:22.022Z INFO webdriver: [POST] http://127.0.0.1:4551/session
+2025-10-23T12:35:25.149Z INFO webdriver: Register BiDi handler for session with id 26d4c0e988f43a0710249bcdd0b4b3d0
+2025-10-23T12:35:25.149Z INFO webdriver: Connecting to webSocketUrl ws://127.0.0.1:4445/session/26d4c0e988f43a0710249bcdd0b4b3d0
+2025-10-23T12:35:25.157Z INFO webdriver: Register BiDi handler for session with id 1f92447f8d87d5033029cf1b5a9a0894
+2025-10-23T12:35:25.157Z INFO webdriver: Connecting to webSocketUrl ws://127.0.0.1:4445/session/1f92447f8d87d5033029cf1b5a9a0894
+2025-10-23T12:35:25.161Z INFO webdriver: Connected to Bidi protocol at ws://127.0.0.1:4445/session/26d4c0e988f43a0710249bcdd0b4b3d0
+2025-10-23T12:35:25.161Z INFO webdriver: Connected to WebDriver Bidi interface at ws://127.0.0.1:4445/session/26d4c0e988f43a0710249bcdd0b4b3d0
+2025-10-23T12:35:25.161Z INFO webdriver: COMMAND getWindowHandle()
+2025-10-23T12:35:25.162Z INFO webdriver: BIDI COMMAND browsingContext.getTree {}
+2025-10-23T12:35:25.164Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.contextCreated"]}
+2025-10-23T12:35:25.164Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["log.entryAdded","browsingContext.navigationStarted"]}
+2025-10-23T12:35:25.165Z INFO webdriver: BIDI COMMAND script.addPreloadScript { functionDeclaration: <PreloadScript[1319 bytes]>, contexts: undefined }
+2025-10-23T12:35:25.165Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.navigationStarted","browsingContext.fragmentNavigated","network.responseCompleted","network.beforeRequestSent","network.fetchError"]}
+2025-10-23T12:35:25.165Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.userPromptOpened"]}
+2025-10-23T12:35:25.165Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.navigationStarted"]}
+2025-10-23T12:35:25.165Z INFO webdriver: [GET] http://127.0.0.1:4551/session/26d4c0e988f43a0710249bcdd0b4b3d0/window
+2025-10-23T12:35:25.167Z INFO webdriver: Connected to Bidi protocol at ws://127.0.0.1:4445/session/1f92447f8d87d5033029cf1b5a9a0894
+2025-10-23T12:35:25.167Z INFO webdriver: Connected to WebDriver Bidi interface at ws://127.0.0.1:4445/session/1f92447f8d87d5033029cf1b5a9a0894
+2025-10-23T12:35:25.167Z INFO webdriver: COMMAND getWindowHandle()
+2025-10-23T12:35:25.167Z INFO webdriver: BIDI COMMAND browsingContext.getTree {}
+2025-10-23T12:35:25.167Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.contextCreated"]}
+2025-10-23T12:35:25.167Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["log.entryAdded","browsingContext.navigationStarted"]}
+2025-10-23T12:35:25.167Z INFO webdriver: BIDI COMMAND script.addPreloadScript { functionDeclaration: <PreloadScript[1319 bytes]>, contexts: undefined }
+2025-10-23T12:35:25.168Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.navigationStarted","browsingContext.fragmentNavigated","network.responseCompleted","network.beforeRequestSent","network.fetchError"]}
+2025-10-23T12:35:25.168Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.userPromptOpened"]}
+2025-10-23T12:35:25.168Z INFO webdriver: BIDI COMMAND session.subscribe {"events":["browsingContext.navigationStarted"]}
+2025-10-23T12:35:25.168Z INFO webdriver: [GET] http://127.0.0.1:4551/session/1f92447f8d87d5033029cf1b5a9a0894/window
+2025-10-23T12:35:25.171Z INFO webdriver: RESULT B3A170452D936D7A1DC674101E37F565
+2025-10-23T12:35:25.172Z INFO webdriver: RESULT BD7811220741DADE12202EA34D10BAEA
+2025-10-23T12:35:25.175Z INFO webdriver: BIDI RESULT {"id":1,"result":{"contexts":[{"children":[],"clientWindow":"161519580","context":"B3A170452D936D7A1DC674101E37F565","originalOpener":null,"parent":null,"url":"http://localhost:3000/","userContext":"default"}]},"type":"success"}
+2025-10-23T12:35:25.176Z INFO webdriverio:PolyfillManager: Adding polyfill script to context with id B3A170452D936D7A1DC674101E37F565
+2025-10-23T12:35:25.176Z INFO webdriver: BIDI COMMAND script.callFunction {"functionDeclaration":"<Function[443 bytes] webdriverioPolyfill>","target":{"children":[],"clientWindow":"161519580","context":"B3A170452D936D7A1DC674101E37F565","originalOpener":null,"parent":null,"url":"http://localhost:3000/","userContext":"default"},"awaitPromise":false}
+2025-10-23T12:35:25.176Z INFO webdriver: BIDI COMMAND script.addPreloadScript { functionDeclaration: <PreloadScript[443 bytes]>, contexts: ["B3A170452D936D7A1DC674101E37F565"] }
+2025-10-23T12:35:25.176Z INFO webdriver: BIDI RESULT {"id":1,"result":{"contexts":[{"children":[],"clientWindow":"1508672815","context":"BD7811220741DADE12202EA34D10BAEA","originalOpener":null,"parent":null,"url":"http://localhost:3000/","userContext":"default"}]},"type":"success"}
+2025-10-23T12:35:25.176Z INFO webdriverio:PolyfillManager: Adding polyfill script to context with id BD7811220741DADE12202EA34D10BAEA
+2025-10-23T12:35:25.176Z INFO webdriver: BIDI COMMAND script.callFunction {"functionDeclaration":"<Function[443 bytes] webdriverioPolyfill>","target":{"children":[],"clientWindow":"1508672815","context":"BD7811220741DADE12202EA34D10BAEA","originalOpener":null,"parent":null,"url":"http://localhost:3000/","userContext":"default"},"awaitPromise":false}
+2025-10-23T12:35:25.176Z INFO webdriver: BIDI COMMAND script.addPreloadScript { functionDeclaration: <PreloadScript[443 bytes]>, contexts: ["BD7811220741DADE12202EA34D10BAEA"] }
+2025-10-23T12:35:25.178Z INFO webdriver: BIDI RESULT {"id":2,"result":{"subscription":"c978bbea-4c4f-4f1d-b547-6a052fe64a98"},"type":"success"}
+2025-10-23T12:35:25.178Z INFO webdriver: BIDI RESULT {"id":2,"result":{"subscription":"1b200e6f-f1b6-458e-8ce8-668e20d00a33"},"type":"success"}
+2025-10-23T12:35:25.178Z INFO webdriver: BIDI RESULT {"id":3,"result":{"subscription":"e85a2e18-48bb-4545-b458-8c2426dda949"},"type":"success"}
+2025-10-23T12:35:25.178Z INFO webdriver: BIDI RESULT {"id":3,"result":{"subscription":"dff29146-55be-4461-9bc9-d0d0b5e90ba0"},"type":"success"}
+2025-10-23T12:35:25.179Z INFO webdriver: BIDI RESULT {"id":5,"result":{"subscription":"3060c9b6-4b3a-4f7a-9242-078831708304"},"type":"success"}
+2025-10-23T12:35:25.180Z INFO webdriver: BIDI RESULT {"id":5,"result":{"subscription":"8203ac3b-903d-4ef4-bdb1-172d9cedac74"},"type":"success"}
+2025-10-23T12:35:25.180Z INFO webdriver: BIDI RESULT {"id":6,"result":{"subscription":"ecf5cfa0-0cfb-4fa1-a7df-078aca96e58e"},"type":"success"}
+2025-10-23T12:35:25.180Z INFO webdriver: BIDI RESULT {"id":6,"result":{"subscription":"9aa39b94-e284-4e96-879f-f20ffcc2c630"},"type":"success"}
+2025-10-23T12:35:25.180Z INFO webdriver: BIDI RESULT {"id":4,"result":{"script":"fae31315-fcd2-4ab5-bfe0-f53bea9016ab"},"type":"success"}
+2025-10-23T12:35:25.180Z INFO webdriver: BIDI RESULT {"id":4,"result":{"script":"c34fc62b-e725-472a-9e6a-f08999870f4e"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":7,"result":{"subscription":"e04d1759-4ab0-40d6-8eab-9befbf471da4"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":7,"result":{"subscription":"32d47cff-7697-4873-bbb4-8161410f6cf7"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":8,"result":{"realm":"-7651374051839261424.-7626749246873709510","result":{"type":"undefined"},"type":"success"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":9,"result":{"script":"bfe5fb47-5083-474e-95ec-2becd01c6479"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":8,"result":{"realm":"-4500954004873526346.-4487792669116222557","result":{"type":"undefined"},"type":"success"},"type":"success"}
+2025-10-23T12:35:25.181Z INFO webdriver: BIDI RESULT {"id":9,"result":{"script":"6adc082d-6fda-441d-b709-1947253fd82b"},"type":"success"}
+2025-10-23T12:35:25.186Z ERROR @wdio/runner: Error: Unable to load spec files quite likely because they rely on `browser` object that is not fully initialized.
+`browser` object has only `capabilities` and some flags like `isMobile`.
+Helper files that use other `browser` commands have to be moved to `before` hook.
+Spec file(s): file:///C:/Users/kado/dev/flashback/client/e2e/specs/basic.interaction.e2e.ts
+Error: TSError: ⨯ Unable to compile TypeScript:
+e2e/specs/basic.interaction.e2e.ts(2,62): error TS7006: Parameter 'target' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,69): error TS7006: Parameter 'value' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1031): error TS7034: Variable 'server' implicitly has type 'any' in some locations where its type cannot be determined.
+e2e/specs/basic.interaction.e2e.ts(2,1190): error TS7005: Variable 'server' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1285): error TS7005: Variable 'server' implicitly has an 'any' type.
+e2e/specs/basic.interaction.e2e.ts(2,1325): error TS2304: Cannot find name 'browser'.
+e2e/specs/basic.interaction.e2e.ts(2,1364): error TS2304: Cannot find name 'browser'.
+e2e/specs/basic.interaction.e2e.ts(2,1487): error TS7006: Parameter 'drv' implicitly has an 'any' type.
+
+    at createTSError (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:859:12)
+    at reportTSError (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:863:19)
+    at getOutput (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1077:36)
+    at Object.compile (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1433:41)
+    at Module.m._compile (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1617:30)
+    at transformer (C:\Users\kado\dev\flashback\client\node_modules\tsx\dist\register-D46fvsV_.cjs:3:1104)
+    at Object.require.extensions.<computed> [as .ts] (C:\Users\kado\dev\flashback\client\node_modules\ts-node\src\index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at MochaAdapter._loadFiles (file:///C:/Users/kado/dev/flashback/client/node_modules/@wdio/mocha-framework/build/index.js:214:29)
+    at async MochaAdapter.init (file:///C:/Users/kado/dev/flashback/client/node_modules/@wdio/mocha-framework/build/index.js:195:5)
+    at async Object.adapterFactory.init (file:///C:/Users/kado/dev/flashback/client/node_modules/@wdio/mocha-framework/build/index.js:334:20)
+    at async Runner.#initFramework (file:///C:/Users/kado/dev/flashback/client/node_modules/@wdio/runner/build/index.js:781:33)
+    at async Runner.run (file:///C:/Users/kado/dev/flashback/client/node_modules/@wdio/runner/build/index.js:698:23)
+2025-10-23T12:35:25.188Z INFO webdriver: COMMAND deleteSession()
+2025-10-23T12:35:25.188Z INFO webdriver: COMMAND deleteSession()
+2025-10-23T12:35:25.188Z INFO webdriver: [DELETE] http://127.0.0.1:4551/session/26d4c0e988f43a0710249bcdd0b4b3d0
+2025-10-23T12:35:25.189Z INFO webdriver: [DELETE] http://127.0.0.1:4551/session/1f92447f8d87d5033029cf1b5a9a0894
+2025-10-23T12:35:25.202Z INFO webdriver: RESULT null
+2025-10-23T12:35:25.203Z INFO webdriver: Close Bidi connection to ws://127.0.0.1:4445/session/26d4c0e988f43a0710249bcdd0b4b3d0
