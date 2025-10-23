@@ -4,6 +4,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 
 export interface FlashbackServerStackProps extends cdk.StackProps {
   serverPort: number; // default server port, e.g., 51111
@@ -91,6 +92,34 @@ export class FlashbackServerStack extends cdk.Stack {
 
     // Attach service to NLB target group
     service.attachToNetworkTargetGroup(tg);
+
+    // Autoscale desired tasks between 0 and 1 based on NLB traffic
+    const scalable = service.autoScaleTaskCount({ minCapacity: 0, maxCapacity: 1 });
+
+    // Use a single step scaling policy on ActiveFlowCount:
+    // - if ActiveFlowCount >= 1 => scale out by +1 (to max 1)
+    // - if ActiveFlowCount <= 0 => scale in by -1 (to min 0)
+    const activeFlowMetric = new cloudwatch.Metric({
+      namespace: 'AWS/NetworkELB',
+      metricName: 'ActiveFlowCount',
+      dimensionsMap: {
+        LoadBalancer: nlb.loadBalancerFullName,
+        TargetGroup: tg.targetGroupFullName,
+      },
+      statistic: 'Average',
+      period: cdk.Duration.minutes(1),
+    });
+
+    scalable.scaleOnMetric('ScaleOnActiveFlows', {
+      metric: activeFlowMetric,
+      scalingSteps: [
+        { upper: 0, change: -1 }, // idle -> scale in
+        { lower: 1, change: +1 }, // traffic -> scale out
+      ],
+      cooldown: cdk.Duration.minutes(2), // short cool-down for scale-out/in decisions
+      evaluationPeriods: 2, // require 2 datapoints
+      datapointsToAlarm: 2, // both must meet the condition
+    });
 
     new cdk.CfnOutput(this, 'NlbDnsName', { value: nlb.loadBalancerDnsName });
     new cdk.CfnOutput(this, 'ServerPort', { value: props.serverPort.toString() });

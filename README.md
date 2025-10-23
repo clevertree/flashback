@@ -276,3 +276,22 @@ Troubleshooting:
 - Ensure DNS resolves to the NLB DNS target (dig/nslookup)
 - Ensure the NLB listener is active and the ECS task is healthy (AWS console)
 - Check CloudWatch Logs for the ECS task (streamPrefix: flashback)
+
+
+
+## ECS autoscaling on traffic (Fargate)
+
+The ECS Fargate service behind the Network Load Balancer now scales the desired task count between 0 and 1 based on TCP traffic:
+
+- Scale out to 1 when the NLB Target Group observes any active flows (ActiveFlowCount >= 1).
+- Scale in to 0 when there are no active flows (ActiveFlowCount == 0) for a short sustained period.
+- Capacity is capped at 1 (never scales above 1).
+
+Notes:
+- Cold start: when scaled to 0, the first incoming connection will trigger scale-out; allow time for the task to start and pass health checks before the port is reachable.
+- Metrics used: CloudWatch AWS/NetworkELB ActiveFlowCount with a 1-minute period and 2 evaluation periods.
+- You can adjust cooldowns/periods in infra/cdk/lib/flashback-server-stack.ts if you want faster or slower reactions.
+
+Validation tips:
+- Watch the service Desired tasks/Running tasks in the ECS console; it should drop to 0 after idle, and go to 1 when you try to connect.
+- Generate traffic to trigger scale out: nc -vz server.flashbackrepository.org 51111 (repeat a couple times if needed).
