@@ -2,7 +2,8 @@ name: Deploy Flashback Server
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -49,7 +50,7 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          BRANCH: master
+          BRANCH: main
 
       - name: Verify service is listening
         run: |

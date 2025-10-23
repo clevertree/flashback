@@ -173,7 +173,7 @@ async fn main() {
 
     println!("");
     println!("🚀 Server is running!");
-    println!("   Address: {}", bound_addr);
+    println!("   Address: {}", bind_addr);
     println!("   Ready to accept client connections");
     println!("============================================");
     println!("");

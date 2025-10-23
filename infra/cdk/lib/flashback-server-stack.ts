@@ -34,18 +34,27 @@ export class FlashbackServerStack extends cdk.Stack {
 
     const userDataScript = `#!/bin/bash
 set -euxo pipefail
+
+# Log bootstrap to a file for troubleshooting
+LOGFILE=/var/log/flashback-bootstrap.log
+mkdir -p /var/log
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "[flashback] Starting bootstrap at $(date -Is)"
+
 # Prepare directories
 mkdir -p /opt/flashback
 cd /opt/flashback
 
-# Install dependencies
-yum update -y || true
-yum install -y git gcc openssl-devel pkgconfig systemd || true
+# Install dependencies (Amazon Linux 2023)
+dnf -y update || true
+dnf -y install git gcc gcc-c++ make openssl-devel pkgconf-pkg-config systemd || true
+
 # Install Rust (non-interactive)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source /root/.cargo/env
 
-# Write config.toml
+# Write config.toml (server reads from CWD; we'll set WorkingDirectory to /opt/flashback)
 cat > /opt/flashback/config.toml <<'CFG'
 [server]
 port = ${props.serverPort}
@@ -67,7 +76,7 @@ fi
 
 cd /opt/flashback/repo/server
 # Build server (release)
-/root/.cargo/bin/cargo build --release
+/root/.cargo/bin/cargo build --release | tee -a "$LOGFILE"
 
 # Create systemd service
 cat > /etc/systemd/system/flashback-server.service <<'SVC'
@@ -77,7 +86,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/flashback/repo/server
+WorkingDirectory=/opt/flashback
 ExecStart=/opt/flashback/repo/server/target/release/server
 Environment=RUST_LOG=info
 Restart=always
@@ -90,8 +99,26 @@ SVC
 # Enable and start service
 systemctl daemon-reload
 systemctl enable flashback-server
-systemctl restart flashback-server
-`;
+systemctl restart flashback-server || (journalctl -u flashback-server -n 200 --no-pager; exit 1)
+
+# Post-start smoke check: ensure server is listening on ${props.serverPort}
+for i in $(seq 1 30); do
+  if ss -ltnp | grep -q ":${props.serverPort} "; then
+    echo "[flashback] Server is listening on port ${props.serverPort}"
+    break
+  fi
+  echo "[flashback] Waiting for server to listen on ${props.serverPort} (attempt $i)"
+  sleep 2
+  if [ "$i" -eq 30 ]; then
+    echo "[flashback] ERROR: Server not listening on ${props.serverPort} after timeout"
+    systemctl status flashback-server --no-pager || true
+    exit 1
+  fi
+done
+
+ss -ltnp || true
+
+echo "[flashback] Bootstrap complete at $(date -Is)"`;
 
     const instance = new ec2.Instance(this, 'FlashbackServer', {
       vpc,
@@ -130,7 +157,14 @@ systemctl restart flashback-server
       port: props.serverPort,
       protocol: elbv2.Protocol.TCP,
       targetType: elbv2.TargetType.INSTANCE,
-      healthCheck: { protocol: elbv2.Protocol.TCP },
+      healthCheck: {
+        protocol: elbv2.Protocol.TCP,
+        port: String(props.serverPort),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 2,
+        interval: cdk.Duration.seconds(10),
+        timeout: cdk.Duration.seconds(6),
+      },
     });
     tg.addTarget(new elbv2Targets.InstanceTarget(instance, props.serverPort));
 

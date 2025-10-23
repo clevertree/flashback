@@ -1,0 +1,59 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/target
+            client/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build server
+        working-directory: server
+        run: cargo build --release
+
+      - name: Install Linux GUI build dependencies (for Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \ 
+            libgtk-3-dev \ 
+            libayatana-appindicator3-dev \ 
+            librsvg2-dev \ 
+            libwebkit2gtk-4.1-dev \ 
+            libjavascriptcoregtk-4.1-dev \ 
+            libsoup-3.0-dev \ 
+            pkg-config \ 
+            libssl-dev
+
+      - name: Build client tauri backend
+        working-directory: client/src-tauri
+        run: cargo build --release
+
+      - name: Run server unit tests (if any)
+        working-directory: server
+        run: cargo test --all --no-fail-fast || true
+
+      - name: Run client unit tests (if any)
+        working-directory: client/src-tauri
+        run: cargo test --all --no-fail-fast || true

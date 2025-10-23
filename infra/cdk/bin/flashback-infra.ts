@@ -17,7 +17,7 @@ new FlashbackServerStack(app, 'FlashbackServerStack', {
   instanceType: app.node.tryGetContext('instanceType') || 't3.small',
   sshCidr: app.node.tryGetContext('sshCidr') || '0.0.0.0/0',
   repoUrl: app.node.tryGetContext('repoUrl') || 'https://github.com/your-user/flashback.git',
-  branch: app.node.tryGetContext('branch') || 'master',
+  branch: app.node.tryGetContext('branch') || 'main',
   serverPort: Number(app.node.tryGetContext('serverPort') || 51111),
   keyName: app.node.tryGetContext('keyName'), // optional existing EC2 key pair name
 });
