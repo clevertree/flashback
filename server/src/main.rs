@@ -32,14 +32,15 @@ struct ServerSettings {
 }
 
 fn default_port() -> u16 { 51111 }
-fn default_heartbeat_interval() -> u64 { 60 }
+fn default_heartbeat_interval() -> u64 { 75 }
 fn default_connection_timeout() -> u64 { 120 }
 fn default_host() -> String { "0.0.0.0".to_string() }
 fn default_max_clients() -> usize { 100 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientInfo {
-    ip: String,
+    local_ip: String,
+    remote_ip: String,
     port: u16,
     #[serde(skip)]
     last_ping: Arc<RwLock<DateTime<Utc>>>,
@@ -261,7 +262,7 @@ async fn check_connection_timeouts(clients: ClientMap, writers: WriterMap, timeo
                 clients_lock.remove(&addr);
                 writers_lock.remove(&addr);
                 println!("⏱️  Client timeout: {}:{} (no ping for {}s)", 
-                    info.ip, info.port, timeout_seconds);
+                    info.local_ip, info.port, timeout_seconds);
             }
         }
     }
@@ -288,7 +289,8 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                 } = msg
                 {
                     let client_info = ClientInfo {
-                        ip: client_ip.clone(),
+                        local_ip: client_ip.clone(),
+                        remote_ip: socket_addr.ip().to_string(),
                         port: client_port,
                         last_ping: Arc::new(RwLock::new(Utc::now())),
                     };
@@ -413,7 +415,7 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
         let mut clients_lock = clients.write().await;
         let mut writers_lock = writers.write().await;
         if let Some(info) = clients_lock.remove(&socket_addr) {
-            println!("👋 Client disconnected: {}:{}", info.ip, info.port);
+            println!("👋 Client disconnected: {}:{}", info.local_ip, info.port);
         }
         writers_lock.remove(&socket_addr);
     }
@@ -519,7 +521,7 @@ async fn broadcast_message(writers: &WriterMap, message: &Message, exclude: Opti
 async fn find_addr_by_ip_port(clients: &ClientMap, ip: &str, port: u16) -> Option<SocketAddr> {
     let clients_lock = clients.read().await;
     for (addr, info) in clients_lock.iter() {
-        if info.ip == ip && info.port == port {
+        if (info.local_ip == ip || info.remote_ip == ip) && info.port == port {
             return Some(*addr);
         }
     }

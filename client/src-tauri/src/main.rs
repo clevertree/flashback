@@ -11,7 +11,8 @@ use tokio::time::{interval, Duration};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientInfo {
-    ip: String,
+    local_ip: String,
+    remote_ip: String,
     port: u16,
 }
 
@@ -25,7 +26,8 @@ enum PeerStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EnrichedClientInfo {
-    ip: String,
+    local_ip: String,
+    remote_ip: String,
     port: u16,
     peer_status: String,
 }
@@ -134,7 +136,8 @@ async fn connect_to_server(
     {
         let mut self_lock = state.self_info.lock().unwrap();
         *self_lock = Some(ClientInfo {
-            ip: client_ip.clone(),
+            local_ip: client_ip.clone(),
+            remote_ip: "".to_string(),
             port: actual_port,
         });
     }
@@ -409,7 +412,7 @@ async fn connect_to_server(
                                     val
                                 };
                                 if print_details {
-                                    let list_str = clients.iter().map(|c| format!("{}:{}", c.ip, c.port)).collect::<Vec<_>>().join(", ");
+                                    let list_str = clients.iter().map(|c| format!("{}:{}", c.local_ip, c.port)).collect::<Vec<_>>().join(", ");
                                     println!("Received client list ({}): {}", clients.len(), list_str);
                                 } else {
                                     println!("Received client list: {} clients", clients.len());
@@ -428,11 +431,11 @@ async fn connect_to_server(
                                     .iter()
                                     .map(|c| {
                                         if let Some(ref me) = self_opt {
-                                            if me.ip == c.ip && me.port == c.port {
-                                                return EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "self".to_string() };
+                                            if me.local_ip == c.local_ip && me.port == c.port {
+                                                return EnrichedClientInfo { local_ip: c.local_ip.clone(), remote_ip: c.remote_ip.clone(), port: c.port, peer_status: "self".to_string() };
                                             }
                                         }
-                                        EnrichedClientInfo { ip: c.ip.clone(), port: c.port, peer_status: "disconnected".to_string() }
+                                        EnrichedClientInfo { local_ip: c.local_ip.clone(), remote_ip: c.remote_ip.clone(), port: c.port, peer_status: "disconnected".to_string() }
                                     })
                                     .collect();
                                 let _ = app_handle_clone.emit("client-list-updated", enriched);
@@ -720,7 +723,7 @@ async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>
 #[tauri::command]
 async fn peer_send_dcc_request(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::DccRequest { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+    let msg = Message::DccRequest { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
