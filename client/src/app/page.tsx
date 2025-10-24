@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getConfig, setConfig, type NavSide, peerKey } from '@app/config'
+import pkg from '../../package.json'
 
 import VideoPlayerSection from "@components/VideoPlayerSection/VideoPlayerSection";
 import SettingsSection from "@components/SettingsSection/SettingsSection";
@@ -43,9 +44,10 @@ export default function Home() {
   const [incomingOffer, setIncomingOffer] = useState<{ from_ip: string; from_port: number; name: string; size: number } | null>(null)
   const [showMobileNav, setShowMobileNav] = useState(false)
   const [offeredFiles, setOfferedFiles] = useState<Record<string, File>>({})
-  const [onlineClients, setOnlineClients] = useState<ClientInfo[]>([])
+  const [onlineClients, setOnlineClients] = useState<any[]>([])
   const [onlineKeys, setOnlineKeys] = useState<Set<string>>(new Set())
   const [logs, setLogs] = useState<string[]>([])
+  const [ipMode, setIpMode] = useState<'local' | 'remote'>('local')
 
   useEffect(() => {
     const randomPort = Math.floor(Math.random() * (65535 - 49152) + 49152)
@@ -468,32 +470,49 @@ export default function Home() {
           </ErrorBoundary>
 
           <ErrorBoundary name="ClientsList">
-            <ClientsList
-              clients={clients}
-              selfIp={clientIp}
-              selfPort={parseInt(clientPort || '0')}
-              onlineKeys={onlineKeys}
-              showHistoric={showHistoricClients}
-              onToggleHistoric={() => setShowHistoricClients((v) => !v)}
-              onDccConnect={async (peer) => {
-                setDccPeer(peer)
-                // Initiate direct peer connection (no server relay)
-                try {
-                  await invoke('connect_to_peer', { toIp: peer.ip, toPort: peer.port })
-                } catch (e) {
-                  console.warn('Failed to connect to peer:', e)
-                }
-                try {
-                  await invoke('peer_send_dcc_request', { toIp: peer.ip, toPort: peer.port })
-                } catch (e) {
-                  console.warn('Failed to send DCC request to peer:', e)
-                }
-                // Attempt DCC connect retries only when server disconnected (logs only)
-                dccConnectWithRetries(peer)
-                // Instantly open a new chatroom per requirement
-                scrollTo('dcc')
-              }}
-            />
+            {(() => {
+              const displayClients = (onlineClients || []).map((c: any) => ({ ip: ipMode === 'local' ? c.local_ip : c.remote_ip, port: c.port, peer_status: c.peer_status }))
+              return (
+                <ClientsList
+                  clients={displayClients}
+                  selfIp={ipMode === 'local' ? clientIp : clientIp /* self remote not tracked; using local */}
+                  selfPort={parseInt(clientPort || '0')}
+                  onlineKeys={onlineKeys}
+                  showHistoric={showHistoricClients}
+                  onToggleHistoric={() => setShowHistoricClients((v) => !v)}
+                  ipMode={ipMode}
+                  onToggleIpMode={() => setIpMode(m => m === 'local' ? 'remote' : 'local')}
+                  onDccConnect={async (peer) => {
+                    setDccPeer(peer)
+                    const match = (onlineClients || []).find((c: any) => c.port === peer.port && (c.local_ip === peer.ip || c.remote_ip === peer.ip)) || null
+                    const localCand = match?.local_ip
+                    const remoteCand = match?.remote_ip
+                    const attempts: { ip?: string, port: number }[] = []
+                    if (localCand) attempts.push({ ip: localCand, port: peer.port })
+                    if (remoteCand && remoteCand !== localCand) attempts.push({ ip: remoteCand, port: peer.port })
+                    let connectedOk = false
+                    for (const a of attempts) {
+                      if (!a.ip) continue
+                      try {
+                        await invoke('connect_to_peer', { toIp: a.ip, toPort: a.port })
+                        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}  DCC: connected to ${a.ip}:${a.port}`])
+                        try { await invoke('peer_send_dcc_request', { toIp: a.ip, toPort: a.port }) } catch (e) { console.warn('Failed to send DCC request:', e) }
+                        connectedOk = true
+                        break
+                      } catch (e) {
+                        console.warn('Failed to connect to peer candidate:', a, e)
+                        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}  DCC: failed ${a.ip}:${a.port}, trying next`])
+                      }
+                    }
+                    if (!connectedOk) {
+                      setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}  DCC: all connection attempts failed for port ${peer.port}`])
+                    }
+                    // Open chatroom when attempted
+                    scrollTo('dcc')
+                  }}
+                />
+              )
+            })()}
           </ErrorBoundary>
 
           <ErrorBoundary name="DccChatroom">
@@ -530,6 +549,10 @@ export default function Home() {
           <ErrorBoundary name="VideoPlayerSection">
             <VideoPlayerSection autoPlay={autoPlayMedia} source={videoSrc} />
           </ErrorBoundary>
+
+          <div className="text-xs text-gray-500 mt-6 text-center">
+            Client version: {pkg.version}
+          </div>
       </main>
 
       {/* DCC Approval Modal */}

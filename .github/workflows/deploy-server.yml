@@ -46,6 +46,11 @@ jobs:
             echo "latest_tag=" >> $GITHUB_OUTPUT
           fi
 
+      - name: Bump versions (client + server)
+        run: |
+          chmod +x scripts/bump-versions.sh || true
+          scripts/bump-versions.sh
+
       - name: Build image
         working-directory: server
         run: |

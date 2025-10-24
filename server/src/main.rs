@@ -57,7 +57,11 @@ enum Message {
     #[serde(rename = "client_list")]
     ClientList { clients: Vec<ClientInfo> },
     #[serde(rename = "client_list_request")]
-    ClientListRequest, 
+    ClientListRequest,
+    #[serde(rename = "server_info_request")]
+    ServerInfoRequest,
+    #[serde(rename = "server_info")]
+    ServerInfo { version: String },
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "pong")]
@@ -346,6 +350,15 @@ async fn handle_client(socket: TcpStream, socket_addr: SocketAddr, clients: Clie
                                         Message::ClientListRequest => {
                                             if let Err(e) = send_client_list(&writer, &clients).await {
                                                 println!("❌ Error sending client list on request: {}", e);
+                                            }
+                                        }
+                                        Message::ServerInfoRequest => {
+                                            // Respond with server info JSON (version only for now)
+                                            let info = Message::ServerInfo { version: env!("CARGO_PKG_VERSION").to_string() };
+                                            if let Ok(json) = serde_json::to_string(&info) {
+                                                let mut writer_lock = writer.lock().await;
+                                                let _ = writer_lock.write_all((json + "\n").as_bytes()).await;
+                                                let _ = writer_lock.flush().await;
                                             }
                                         }
                                         Message::Chat { from_ip, from_port, message, timestamp, channel } => {

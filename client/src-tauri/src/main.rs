@@ -45,7 +45,11 @@ enum Message {
     #[serde(rename = "client_list")]
     ClientList { clients: Vec<ClientInfo> },
     #[serde(rename = "client_list_request")]
-    ClientListRequest, 
+    ClientListRequest,
+    #[serde(rename = "server_info_request")]
+    ServerInfoRequest,
+    #[serde(rename = "server_info")]
+    ServerInfo { version: String },
     #[serde(rename = "ping")]
     Ping,
     #[serde(rename = "pong")]
@@ -386,6 +390,12 @@ async fn connect_to_server(
         *state_tx = Some(tx);
     }
 
+    // Request server info immediately (before user list)
+    let sender_opt = { state.tx.lock().unwrap().clone() };
+    if let Some(sender) = sender_opt {
+        let _ = sender.send(Message::ServerInfoRequest).await;
+    }
+
     // Spawn task to handle incoming messages
     let app_handle_clone = app_handle.clone();
     let state_clients = Arc::clone(&state.clients);
@@ -445,6 +455,11 @@ async fn connect_to_server(
                             }
                             Message::Pong => {
                                 println!("💓 Received pong from server");
+                            }
+                            Message::ServerInfo { version } => {
+                                let info_json = serde_json::json!({"version": version});
+                                println!("ℹ️ Server info: {}", info_json);
+                                let _ = app_handle_clone.emit("log", format!("Server info: {}", info_json));
                             }
                             Message::Chat {
                                 from_ip,
@@ -731,7 +746,7 @@ async fn peer_send_dcc_request(to_ip: String, to_port: u16, state: State<'_, App
 #[tauri::command]
 async fn peer_send_dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::DccOpened { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+    let msg = Message::DccOpened { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -739,7 +754,7 @@ async fn peer_send_dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppS
 #[tauri::command]
 async fn peer_send_file_offer(to_ip: String, to_port: u16, name: String, size: u64, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileOffer { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, size };
+    let msg = Message::FileOffer { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, size };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -747,7 +762,7 @@ async fn peer_send_file_offer(to_ip: String, to_port: u16, name: String, size: u
 #[tauri::command]
 async fn peer_send_file_accept(to_ip: String, to_port: u16, name: String, action: String, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileAccept { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, action };
+    let msg = Message::FileAccept { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, action };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -755,7 +770,7 @@ async fn peer_send_file_accept(to_ip: String, to_port: u16, name: String, action
 #[tauri::command]
 async fn peer_send_file_chunk(to_ip: String, to_port: u16, name: String, offset: u64, bytes_total: u64, data_base64: String, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileChunk { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, offset, bytes_total, data_base64 };
+    let msg = Message::FileChunk { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, offset, bytes_total, data_base64 };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -763,7 +778,7 @@ async fn peer_send_file_chunk(to_ip: String, to_port: u16, name: String, offset:
 #[tauri::command]
 async fn peer_send_file_cancel(to_ip: String, to_port: u16, name: String, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileCancel { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name };
+    let msg = Message::FileCancel { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -772,7 +787,7 @@ async fn peer_send_file_cancel(to_ip: String, to_port: u16, name: String, state:
 async fn peer_send_dcc_chat(to_ip: String, to_port: u16, text: String, state: State<'_, AppState>) -> Result<String, String> {
     let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let msg = Message::DccChat { from_ip: self_opt.ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, text, timestamp };
+    let msg = Message::DccChat { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, text, timestamp };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -992,7 +1007,7 @@ fn run_cli(app: tauri::App) {
                 let (client_ip, client_port) = {
                     let guard = state.self_info.lock().unwrap();
                     if let Some(me) = &*guard {
-                        (me.ip.clone(), me.port)
+                        (me.local_ip.clone(), me.port)
                     } else {
                         println!("You must connect-server first to set your client_ip and client_port.");
                         continue;
@@ -1133,15 +1148,16 @@ fn emit_enriched_client_list(
         .iter()
         .map(|c| {
             if let Some(ref me) = self_opt {
-                if me.ip == c.ip && me.port == c.port {
+                if me.local_ip == c.local_ip && me.port == c.port {
                     return EnrichedClientInfo {
-                        ip: c.ip.clone(),
+                        local_ip: c.local_ip.clone(),
+                        remote_ip: c.remote_ip.clone(),
                         port: c.port,
                         peer_status: "self".to_string(),
                     };
                 }
             }
-            let key = format!("{}:{}", c.ip, c.port);
+            let key = format!("{}:{}", c.local_ip, c.port);
             let status_str = {
                 let peers = state_peers.lock().unwrap();
                 match peers.get(&key).map(|pc| pc.status.clone()) {
@@ -1152,7 +1168,8 @@ fn emit_enriched_client_list(
                 }
             };
             EnrichedClientInfo {
-                ip: c.ip.clone(),
+                local_ip: c.local_ip.clone(),
+                remote_ip: c.remote_ip.clone(),
                 port: c.port,
                 peer_status: status_str,
             }

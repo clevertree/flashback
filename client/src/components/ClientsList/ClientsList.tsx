@@ -15,20 +15,29 @@ export interface ClientsListProps {
   onlineKeys?: Set<string>
   showHistoric?: boolean
   onToggleHistoric?: () => void
+  ipMode?: 'local' | 'remote'
+  onToggleIpMode?: () => void
 }
 
-export default function ClientsList({ id = 'clients', clients, selfIp, selfPort, onDccConnect, onlineKeys, showHistoric, onToggleHistoric }: ClientsListProps) {
+export default function ClientsList({ id = 'clients', clients, selfIp, selfPort, onDccConnect, onlineKeys, showHistoric, onToggleHistoric, ipMode = 'local', onToggleIpMode }: ClientsListProps) {
   const onlineCount = clients.filter(c => onlineKeys?.has(`${c.ip}:${c.port}`)).length
   const header = showHistoric ? `Clients (${onlineCount} online${clients.length > onlineCount ? `, ${clients.length - onlineCount} historic` : ''})` : `Connected Clients (${clients.length})`
   return (
     <section id={id} className="bg-gray-800 rounded-lg p-6 shadow-lg">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-semibold">{header}</h2>
-        {typeof showHistoric === 'boolean' && onToggleHistoric && (
-          <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={onToggleHistoric}>
-            {showHistoric ? 'Hide historic' : 'Show historic'}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {typeof onToggleIpMode === 'function' && (
+            <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={onToggleIpMode}>
+              {ipMode === 'local' ? 'Showing Local IP' : 'Showing Remote IP'}
+            </button>
+          )}
+          {typeof showHistoric === 'boolean' && onToggleHistoric && (
+            <button className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded" onClick={onToggleHistoric}>
+              {showHistoric ? 'Hide historic' : 'Show historic'}
+            </button>
+          )}
+        </div>
       </div>
       {clients.length === 0 ? (
         <p className="text-gray-400 text-center py-8">No clients connected yet. Connect to see other clients.</p>
