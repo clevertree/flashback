@@ -4,18 +4,27 @@ version = "0.1.0"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2.9.0", features = [] }
+tauri-build = { version = "2.5.1", features = [] }
 
 [dependencies]
-tauri = { version = "2.9.0", features = [] }
+tauri = { version = "2.9.1", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.35", features = ["full"] }
 chrono = "0.4"
-tauri-plugin-shell = "2.9.0"
-tauri-plugin-dialog = "2.9.0"
-tauri-plugin-fs = "2.9.0"
+tauri-plugin-shell = "2.3.1"
+tauri-plugin-dialog = "2.4.0"
+tauri-plugin-fs = "2.4.2"
 local-ip-address = "0.6"
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
+hex = "0.4"
+rcgen = "0.12"
+ring = "0.17"
+x509-cert = { version = "0.2", features = ["builder", "pem"] }
+der = "0.7"
+const-oid = "0.9"
+pem-rfc7468 = "0.7"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

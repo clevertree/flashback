@@ -1,10 +1,30 @@
 "use client";
-import React, {useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 
-// Minimal starter UI per new requirements
+// Client must use Rust plugins for all crypto; no Node/browser crypto implementations here.
 // Defaults
 const DEFAULT_SERVER = 'http://localhost:8080';
-const DEFAULT_LOCAL_PATH = '~/.flashback/';
+const DEFAULT_LOCAL_PATH = '~/.relay-client/';
+
+// Rust plugin interface (provided by Tauri, WRY, or custom bridge at runtime)
+declare global {
+    interface Window {
+        flashbackCrypto?: {
+            // Check if a private RSA key exists at the given config path. May also return a cert if available.
+            checkKeyExists: (configPath: string) => Promise<{ exists: boolean; certPem?: string }>;
+            // Generate RSA keypair and self-signed X.509 certificate (email in subject) and save to path.
+            generateUserKeysAndCert: (args: {
+                email: string;
+                password: string;
+                bits?: number;
+                friendlyName?: string;
+                savePath: string;
+            }) => Promise<{ certPem: string; privateKeyPemPath: string; certPemPath: string }>;
+            // Optional helper to load cert PEM from disk if needed.
+            loadCertPemFromPath?: (path: string) => Promise<{ certPem: string }>;
+        };
+    }
+}
 
 interface RepoItem {
     id: number;
@@ -17,35 +37,87 @@ export default function Home() {
     const [serverBase, setServerBase] = useState<string>(DEFAULT_SERVER);
     const [localPath, setLocalPath] = useState<string>(DEFAULT_LOCAL_PATH);
 
-    // Step 1: Keys (basic placeholders; generation not implemented yet)
-    const [publicKeyHash, setPublicKeyHash] = useState<string>("");
-    const [sshPublicKeyHash, setSshPublicKeyHash] = useState<string>("");
-    const [publicKeyFull, setPublicKeyFull] = useState<string>("");
+    // Keys/cert state
+    const [email, setEmail] = useState<string>("");
+    const [password, setPassword] = useState<string>("");
+    const [bits, setBits] = useState<number>(2048);
+    const [friendlyName, setFriendlyName] = useState<string>('FlashBack');
+
+    const [keyExists, setKeyExists] = useState<boolean>(false);
+    const [checkingKey, setCheckingKey] = useState<boolean>(false);
+    const [certPem, setCertPem] = useState<string>("");
 
     const [repos, setRepos] = useState<RepoItem[]>([]);
     const [repoLoading, setRepoLoading] = useState(false);
     const [log, setLog] = useState<string>("");
 
     const [socketAddr, setSocketAddr] = useState<string>(() => {
-        // placeholder autodetect idea
         const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
         return `${host}:0`;
     });
+
+    const cryptoAvailable = useMemo(() => typeof window !== 'undefined' && !!window.flashbackCrypto, []);
 
     function appendLog(msg: string) {
         setLog(prev => `${prev}${prev ? "\n" : ""}${msg}`);
     }
 
+    // Check for private RSA key existence at config path and optionally load certificate
+    useEffect(() => {
+        let cancelled = false;
+        async function run() {
+            if (!cryptoAvailable) return;
+            setCheckingKey(true);
+            try {
+                const res = await window.flashbackCrypto!.checkKeyExists(localPath);
+                if (cancelled) return;
+                setKeyExists(!!res?.exists);
+                if (res?.certPem) setCertPem(res.certPem);
+                appendLog(`Key check at ${localPath}: ${res?.exists ? 'found' : 'not found'}`);
+            } catch (e: any) {
+                appendLog(`key check error: ${e?.message || e}`);
+            } finally {
+                if (!cancelled) setCheckingKey(false);
+            }
+        }
+        run();
+        return () => { cancelled = true };
+    }, [localPath, cryptoAvailable]);
+
+    async function handleGenerate() {
+        if (!cryptoAvailable) {
+            appendLog('Crypto plugin not available. Ensure Rust plugin is loaded.');
+            return;
+        }
+        if (!email || !password) {
+            appendLog('Please provide email and password to generate keys.');
+            return;
+        }
+        try {
+            appendLog(`Generating RSA ${bits} keypair and certificate via Rust plugin...`);
+            const res = await window.flashbackCrypto!.generateUserKeysAndCert({
+                email, password, bits, friendlyName, savePath: localPath,
+            });
+            setCertPem(res.certPem || "");
+            setKeyExists(true);
+            appendLog(`Keys generated. Saved private key at ${res.privateKeyPemPath}, cert at ${res.certPemPath}.`);
+        } catch (e: any) {
+            appendLog(`generate error: ${e?.message || e}`);
+        }
+    }
+
     async function handleRegister() {
         try {
+            if (!certPem) {
+                appendLog('No certificate loaded. Generate or load keys first.');
+                return;
+            }
             const url = `${serverBase.replace(/\/$/, '')}/api/register`;
             const res = await fetch(url, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    publicKeyHash: publicKeyHash,
-                    public_key_full: publicKeyFull,
-                    publicKeyHash: sshPublicKeyHash
+                    certificate: certPem,
                 }),
             });
             const data = await res.json();
@@ -82,7 +154,8 @@ export default function Home() {
             const res = await fetch(url, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({publicKeyHash: publicKeyHash, socket_address: socketAddr}),
+                // Server contract may change; keeping placeholder publicKeyHash for now if needed later
+                body: JSON.stringify({ socket_address: socketAddr }),
             });
             const data = await res.json();
             appendLog(`broadcast/ready ${res.status}: ${JSON.stringify(data)}`);
@@ -104,39 +177,62 @@ export default function Home() {
                                onChange={e => setServerBase(e.target.value)}/>
                     </label>
                     <label className="flex flex-col">
-                        <span className="text-gray-600">Local Path</span>
+                        <span className="text-gray-600">Config Path</span>
                         <input className="border px-3 py-2 rounded" value={localPath}
                                onChange={e => setLocalPath(e.target.value)}/>
                     </label>
+                    <div className="text-xs text-gray-500">
+                        Encryption processing policy: handled exclusively by Rust plugin; no Node/browser crypto.
+                    </div>
                 </div>
             </section>
 
             <section className="mb-6">
-                <h2 className="text-lg font-medium mb-2">Keys</h2>
-                <p className="text-gray-600 mb-2">Default encryption: RSA. Default bitrate: 2048.</p>
-                <div className="grid sm:grid-cols-2 gap-3 max-w-3xl">
-                    <label className="flex flex-col">
-                        <span className="text-gray-600">Public Key Hash</span>
-                        <input className="border px-3 py-2 rounded" value={publicKeyHash}
-                               onChange={e => setPublicKeyHash(e.target.value)}/>
-                    </label>
-                    <label className="flex flex-col">
-                        <span className="text-gray-600">SSH Public Key Hash</span>
-                        <input className="border px-3 py-2 rounded" value={sshPublicKeyHash}
-                               onChange={e => setSshPublicKeyHash(e.target.value)}/>
-                    </label>
-                    <label className="flex flex-col sm:col-span-2">
-                        <span className="text-gray-600">Public Key (full)</span>
-                        <textarea className="border px-3 py-2 rounded" rows={4} value={publicKeyFull}
-                                  onChange={e => setPublicKeyFull(e.target.value)}/>
-                    </label>
+                <h2 className="text-lg font-medium mb-2">Keys & Certificate</h2>
+                <div className="mb-2 text-gray-600">
+                    {checkingKey ? 'Checking for existing key...' : keyExists ? 'Private key found at config path.' : 'No private key found at config path.'}
                 </div>
+
+                {!keyExists && (
+                    <div className="grid sm:grid-cols-2 gap-3 max-w-3xl">
+                        <label className="flex flex-col">
+                            <span className="text-gray-600">Email</span>
+                            <input className="border px-3 py-2 rounded" value={email}
+                                   onChange={e => setEmail(e.target.value)} placeholder="you@example.com"/>
+                        </label>
+                        <label className="flex flex-col">
+                            <span className="text-gray-600">Password</span>
+                            <input type="password" className="border px-3 py-2 rounded" value={password}
+                                   onChange={e => setPassword(e.target.value)} placeholder="Secret to protect P12/PK"/>
+                        </label>
+                        <label className="flex flex-col">
+                            <span className="text-gray-600">Bit length</span>
+                            <input type="number" min={2048} step={1024} className="border px-3 py-2 rounded" value={bits}
+                                   onChange={e => setBits(parseInt(e.target.value || '2048', 10))}/>
+                        </label>
+                        <label className="flex flex-col">
+                            <span className="text-gray-600">Friendly Name</span>
+                            <input className="border px-3 py-2 rounded" value={friendlyName}
+                                   onChange={e => setFriendlyName(e.target.value)}/>
+                        </label>
+                        <div className="sm:col-span-2 flex gap-2 mt-1">
+                            <button className="px-3 py-2 border rounded" onClick={handleGenerate} disabled={!cryptoAvailable}>
+                                {cryptoAvailable ? 'Generate Keypair (Rust)' : 'Crypto Plugin Unavailable'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {certPem && (
+                    <div className="mt-3">
+                        <div className="text-gray-600 mb-1">Certificate (PEM):</div>
+                        <textarea className="border px-3 py-2 rounded w-full" rows={6} value={certPem}
+                                  onChange={e => setCertPem(e.target.value)} />
+                    </div>
+                )}
+
                 <div className="flex gap-2 mt-3">
-                    <button className="px-3 py-2 border rounded"
-                            onClick={() => appendLog('Generate RSA 2048 keypair -> ' + localPath + ' (not implemented)')}>Generate
-                        Keypair
-                    </button>
-                    <button className="px-3 py-2 border rounded" onClick={handleRegister}>Register</button>
+                    <button className="px-3 py-2 border rounded" onClick={handleRegister} disabled={!certPem}>Register</button>
                 </div>
             </section>
 

@@ -10,7 +10,7 @@
     "start:8080": "next start -p 8080",
     "lint": "eslint",
     "cypress:open": "cypress open",
-    "cypress:run": "cypress run",
+    "cypress:e2e": "cypress run --e2e",
     "keys:generate": "node scripts/generate_keys_fixture.js",
     "keys:verify": "node scripts/generate_keys_fixture.js --verify"
   },

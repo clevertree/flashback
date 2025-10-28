@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, State, Manager};
+use sha2::{Digest, Sha256};
+use hex as hex_crate;
+use std::convert::TryFrom;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -105,6 +108,9 @@ struct AppState {
     cli_auto_allow: Arc<Mutex<bool>>,
     allowed_peers: Arc<Mutex<std::collections::HashSet<String>>>,
     pending_request: Arc<Mutex<Option<PendingRequest>>>,
+    // Certificate and hash for registration
+    cert_pem: Arc<Mutex<Option<String>>>,
+    pkh_hex: Arc<Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -836,9 +842,13 @@ fn main() {
         cli_auto_allow: Arc::new(Mutex::new(false)),
         allowed_peers: Arc::new(Mutex::new(std::collections::HashSet::new())),
         pending_request: Arc::new(Mutex::new(None)),
+        cert_pem: Arc::new(Mutex::new(None)),
+        pkh_hex: Arc::new(Mutex::new(None)),
     };
 
     let args: Vec<String> = std::env::args().collect();
+    let want_start_listener = args.iter().any(|a| a == "--start-listener");
+    let want_auto_allow = args.iter().any(|a| a == "--auto-allow");
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_cli_help();
         return;
@@ -865,8 +875,59 @@ fn main() {
             .expect("failed to build tauri app for CLI mode");
         {
             let st: tauri::State<AppState> = app.state::<AppState>();
-            let mut flag = st.cli_mode.lock().unwrap();
-            *flag = true;
+            {
+                let mut flag = st.cli_mode.lock().unwrap();
+                *flag = true;
+            }
+            if want_auto_allow {
+                let mut aa = st.cli_auto_allow.lock().unwrap();
+                *aa = true;
+            }
+            // Handle optional startup certificate generation: --gen-cert=<email>
+            if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-cert=")) {
+                if let Some((_, email)) = gen_arg.split_once('=') {
+                    // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
+                    let mut params = rcgen::CertificateParams::default();
+                    params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.to_string()));
+                    params
+                        .distinguished_name
+                        .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                    match rcgen::Certificate::from_params(params) {
+                        Ok(cert) => {
+                            let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); String::new() } };
+                            let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); Vec::new() } };
+                            if !pem.is_empty() && !der.is_empty() {
+                                let mut hasher = Sha256::new();
+                                hasher.update(&der);
+                                let pkh = hex_crate::encode(hasher.finalize());
+                                {
+                                    let mut c = st.cert_pem.lock().unwrap();
+                                    *c = Some(pem.clone());
+                                }
+                                {
+                                    let mut h = st.pkh_hex.lock().unwrap();
+                                    *h = Some(pkh.clone());
+                                }
+                                let pid = std::process::id();
+                                let cert_path = format!("cert-{}.pem", pid);
+                                let pkh_path = format!("pkh-{}.txt", pid);
+                                let _ = std::fs::write(&cert_path, &pem);
+                                let _ = std::fs::write(&pkh_path, &pkh);
+                                println!("Generated certificate for {}", email);
+                            }
+                        }
+                        Err(e) => {
+                            println!("Error generating certificate: {}", e);
+                        }
+                    }
+                }
+            }
+            if want_start_listener {
+                // Start listener before entering interactive loop
+                let ah = app.handle();
+                let st2 = app.state::<AppState>();
+                let _ = tauri::async_runtime::block_on(start_peer_listener_async(st2, ah.clone()));
+            }
         }
         run_cli(app);
         return;
@@ -917,6 +978,10 @@ fn print_cli_help() {
     println!("  allow                Approve the pending incoming chat/transfer request");
     println!("  allow auto           Auto-approve all incoming chats/transfers for this session");
     println!("  deny                 Reject the pending incoming chat/transfer request");
+    println!("  gen-cert <email>     Generate a self-signed certificate with SAN rfc822Name=email");
+    println!("  print-cert           Print the generated certificate PEM between markers");
+    println!("  print-pkh            Print the SHA-256 hash of DER certificate as hex (lowercase)");
+    println!("  start-listener       Start the peer listener on an ephemeral port (no server connection)");
     println!("  quit | exit          Exit the CLI");
 }
 
@@ -929,6 +994,90 @@ fn parse_host_port(input: &str) -> Result<(String, u16), String> {
     Ok((host.to_string(), port))
 }
 
+
+async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<u16, String> {
+    // Detect local client IP
+    let client_ip = local_ip_address::local_ip()
+        .map_err(|e| format!("Failed to determine local IP: {}", e))?
+        .to_string();
+    // Bind ephemeral port
+    let listener = TcpListener::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| format!("Failed to bind peer listener: {}", e))?;
+    let actual_port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get listener local addr: {}", e))?
+        .port();
+    // Save self info
+    {
+        let mut self_lock = state.self_info.lock().unwrap();
+        *self_lock = Some(ClientInfo { local_ip: client_ip.clone(), remote_ip: "".to_string(), port: actual_port });
+    }
+    // Also persist the port to a file for automation environments where stdout may be unavailable (Windows GUI subsystem)
+    let pid = std::process::id();
+    let file_name = format!("peer-port-{}.txt", pid);
+    let _ = std::fs::write(&file_name, format!("{}", actual_port));
+    // Spawn accept loop
+    {
+        let app_handle_clone = app_handle.clone();
+        let print_addr = format!("0.0.0.0:{}", actual_port);
+        tokio::spawn(async move {
+            println!("👂 Peer listener started at {}", print_addr);
+            let pw_map = app_handle_clone.state::<AppState>().peer_writers.clone();
+            let app_handle_outer = app_handle_clone.clone();
+            let listener = listener; // move into task
+            loop {
+                match listener.accept().await {
+                    Ok((stream, remote)) => {
+                        println!("🔗 Incoming peer connection from {}", remote);
+                        let app_handle_incoming = app_handle_outer.clone();
+                        let pw_map = pw_map.clone();
+                        tokio::spawn(async move {
+                            let (reader, writer) = stream.into_split();
+                            let writer_arc = Arc::new(tokio::sync::Mutex::new(writer));
+                            let mut reader = BufReader::new(reader);
+                            let key = format!("{}", remote);
+                            {
+                                let mut map = pw_map.lock().unwrap();
+                                map.insert(key.clone(), writer_arc.clone());
+                            }
+                            let mut line = String::new();
+                            loop {
+                                line.clear();
+                                match reader.read_line(&mut line).await {
+                                    Ok(0) => break,
+                                    Ok(_) => {
+                                        if let Ok(msg) = serde_json::from_str::<Message>(&line) {
+                                            match msg {
+                                                Message::Ping => {
+                                                    let pong = serde_json::to_string(&Message::Pong).unwrap() + "\n";
+                                                    let writer_arc_opt = { pw_map.lock().unwrap().get(&key).cloned() };
+                                                    if let Some(w) = writer_arc_opt {
+                                                        if let Ok(mut guard) = w.try_lock() {
+                                                            if let Err(e) = guard.write_all(pong.as_bytes()).await { println!("Peer write error: {}", e); break; }
+                                                            if let Err(e) = guard.flush().await { println!("Peer flush error: {}", e); break; }
+                                                        }
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        println!("Accept error: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    Ok(actual_port)
+}
 
 fn run_cli(app: tauri::App) {
     use std::io::{self, Write};
@@ -970,6 +1119,65 @@ fn run_cli(app: tauri::App) {
             "quit" | "exit" => {
                 println!("Bye!");
                 break;
+            }
+            "gen-cert" => {
+                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-cert <email>"); continue; } };
+                // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
+                let mut params = rcgen::CertificateParams::default();
+                // Add SAN email entry (RFC 822 name)
+                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
+                // Optionally set a CN for readability (not used by server)
+                params
+                    .distinguished_name
+                    .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                let cert = match rcgen::Certificate::from_params(params) {
+                    Ok(c) => c,
+                    Err(e) => { println!("Error generating certificate: {}", e); continue; }
+                };
+                let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
+                let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
+                // Compute SHA-256 hash over the DER certificate bytes (server does the same)
+                let mut hasher = Sha256::new();
+                hasher.update(&der);
+                let pkh = hex_crate::encode(hasher.finalize());
+                // Save in state
+                {
+                    let mut c = state.cert_pem.lock().unwrap();
+                    *c = Some(pem.clone());
+                }
+                {
+                    let mut h = state.pkh_hex.lock().unwrap();
+                    *h = Some(pkh.clone());
+                }
+                // Also persist to files for automation
+                let pid = std::process::id();
+                let cert_path = format!("cert-{}.pem", pid);
+                let pkh_path = format!("pkh-{}.txt", pid);
+                let _ = std::fs::write(&cert_path, &pem);
+                let _ = std::fs::write(&pkh_path, &pkh);
+                println!("Generated certificate for {}", email);
+            }
+            "print-cert" => {
+                let cert_opt = { state.cert_pem.lock().unwrap().clone() };
+                if let Some(pem) = cert_opt {
+                    println!("-----BEGIN CERT START-----");
+                    print!("{}", pem);
+                    println!("-----END CERT START-----");
+                } else {
+                    println!("No certificate. Run gen-cert <email> first.");
+                }
+            }
+            "print-pkh" => {
+                let pkh_opt = { state.pkh_hex.lock().unwrap().clone() };
+                if let Some(pkh) = pkh_opt { println!("{}", pkh); } else { println!("No PKH. Run gen-cert <email> first."); }
+            }
+            "start-listener" => {
+                let ah = app_handle.clone();
+                let st = state.clone();
+                match async_runtime::block_on(start_peer_listener_async(st, ah)) {
+                    Ok(port) => println!("Listener started on 0.0.0.0:{}", port),
+                    Err(e) => println!("Error starting listener: {}", e),
+                }
             }
             "connect-server" => {
                 let server = match parts.next() { Some(s) => s.to_string(), None => { println!("Usage: connect-server <server:port>"); continue; } };

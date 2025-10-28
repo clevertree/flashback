@@ -16,7 +16,6 @@
     "build-icon": "npx tauri icon src-tauri/icons/icon.png",
     "cypress:install": "cypress install",
     "cypress:open": "cypress open",
-    "cypress:component": "cypress run --component",
     "e2e": "wdio run ./e2e/wdio.multiremote.conf.ts",
     "e2e:debug": "wdio run ./e2e/wdio.multiremote.conf.ts --logLevel trace"
   },

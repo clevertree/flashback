@@ -7,20 +7,29 @@ export function loadPublicCertificate(
 
     // Parse the PEM string into a certificate object
     const certificate = forge.pki.certificateFromPem(certPem);
-    // Subject (the owner of the certificate)
-    const emailAttr = certificate.subject.attributes.find(attr =>
-        attr.name === 'emailAddress');
-    const email = emailAttr?.value as string | undefined;
 
-// Get the DER-encoded certificate
+    // Try Subject emailAddress first
+    const emailSubject = certificate.subject.attributes.find(attr => attr.name === 'emailAddress')?.value as string | undefined;
+
+    // Then try SAN rfc822Name if subject email is missing
+    let emailSan: string | undefined;
+    const sanExt = (certificate.extensions || []).find((ext: any) => ext.name === 'subjectAltName');
+    if (sanExt && Array.isArray((sanExt as any).altNames)) {
+        const rfc822 = (sanExt as any).altNames.find((n: any) => n && (n.type === 1 || n.type === 'rfc822Name'));
+        if (rfc822 && typeof rfc822.value === 'string') {
+            emailSan = rfc822.value as string;
+        }
+    }
+    const email = emailSubject || emailSan;
+
+    // Get the DER-encoded certificate
     const derCertificate = forge.pki.certificateToAsn1(certificate);
     const der = forge.asn1.toDer(derCertificate).getBytes();
 
-// Create a SHA-256 hash of the DER-encoded certificate
+    // Create a SHA-256 hash of the DER-encoded certificate
     const md = forge.md.sha256.create();
     md.update(der);
     const publicKeyHash = md.digest().toHex();
-
 
     return {
         publicKeyHash,
