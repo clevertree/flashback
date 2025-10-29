@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {NextRequest, NextResponse} from 'next/server';
 import {initDatabase, UserModel} from '@/db/models';
 import {parseCertWithNodeCrypto} from "@db/keyUtils";
+import Package from "@/package.json";
 
 export const runtime = 'nodejs';
 
@@ -51,19 +52,23 @@ export async function POST(req: NextRequest) {
                 );
             }
 
-            const created = await UserModel.create({
+            await UserModel.create({
                 certificate,
                 publicKeyHash,
                 email,
             });
-            return NextResponse.json({
-                id: created.id,
-                publicKeyHash
-            }, {status: 201});
         }
+        // Determine remote client IP from headers
+        const xf = req.headers.get('x-forwarded-for') || '';
+        const xr = req.headers.get('x-real-ip') || '';
+        const clientIP = (xf.split(',')[0]?.trim()) || xr || '127.0.0.1';
+        return NextResponse.json({
+            publicKeyHash,
+            serverVersion: Package.version,
+            serverTitle: Package.name,
+            clientIP
+        }, {status: 200});
 
-        // Existing user with the same email and key
-        return NextResponse.json({error: "User exists with the same email and key"}, {status: 409});
     } catch (err: unknown) {
         if (err instanceof Error) {
             console.error('register error', err);

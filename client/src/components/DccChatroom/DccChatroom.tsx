@@ -182,7 +182,7 @@ export default function DccChatroom({
         // Do not set incomingFile here to avoid showing receiver UI on sender
     }
 
-    const isTauri = typeof window !== 'undefined' && (('__TAURI_INTERNALS__' in window) || (window as any).__TAURI__)
+    const isTauri = typeof window !== 'undefined' && (('__TAURI_INTERNALS__' in window) || window.__TAURI__)
 
     function getPlatform(): 'windows' | 'mac' | 'linux' {
         const ua = navigator.userAgent

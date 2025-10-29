@@ -24,7 +24,7 @@ mkdir -p wdio-logs wdio-logs/.log
 log() { echo "[cli-e2e] $*"; }
 
 CLIENT_BIN="client/src-tauri/target/debug/client"
-NEXT_PORT=3000
+NEXT_PORT=8080
 NEXT_BASE="http://127.0.0.1:${NEXT_PORT}"
 SERVER_STARTED=0
 SERVER_PID=0
@@ -59,7 +59,7 @@ log "Building client..."
 cargo build --manifest-path client/src-tauri/Cargo.toml >/dev/null
 
 wait_for_url() {
-  local url="$1"; local timeout="${2:-60}"; local start=$(date +%s)
+  local url="$1"; local timeout="${2:-180}"; local start=$(date +%s)
   while true; do
     if curl -s -o /dev/null -w '%{http_code}' "$url" | grep -qE '^(2|3|4|5)[0-9]{2}$'; then return 0; fi
     sleep 0.2
@@ -78,7 +78,7 @@ if ! curl -s -o /dev/null -w '%{http_code}' "${NEXT_BASE}" | grep -qE '^(2|3|4|5
   SERVER_PID=$!
   SERVER_STARTED=1
   trap 'kill ${SERVER_PID:-0} ${CLIENT_A_PID:-0} ${CLIENT_B_PID:-0} 2>/dev/null || true' EXIT
-  wait_for_url "${NEXT_BASE}" 60
+  wait_for_url "${NEXT_BASE}" 120
 else
   log "Next.js server is already running on :${NEXT_PORT}"
   trap 'kill ${CLIENT_A_PID:-0} ${CLIENT_B_PID:-0} 2>/dev/null || true' EXIT

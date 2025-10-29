@@ -1,17 +1,17 @@
 // Keep Windows console visible (do not hide in release) to support CLI mode
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tauri::{Emitter, State, Manager};
-use sha2::{Digest, Sha256};
 use hex as hex_crate;
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
-use reqwest::StatusCode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientInfo {
@@ -67,19 +67,65 @@ enum Message {
         channel: String,
     },
     #[serde(rename = "dcc_chat")]
-    DccChat { from_ip: String, from_port: u16, to_ip: String, to_port: u16, text: String, timestamp: String },
+    DccChat {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        text: String,
+        timestamp: String,
+    },
     #[serde(rename = "dcc_request")]
-    DccRequest { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
+    DccRequest {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+    },
     #[serde(rename = "dcc_opened")]
-    DccOpened { from_ip: String, from_port: u16, to_ip: String, to_port: u16 },
+    DccOpened {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+    },
     #[serde(rename = "file_offer")]
-    FileOffer { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, size: u64 },
+    FileOffer {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        size: u64,
+    },
     #[serde(rename = "file_accept")]
-    FileAccept { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, action: String },
+    FileAccept {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        action: String,
+    },
     #[serde(rename = "file_chunk")]
-    FileChunk { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String, offset: u64, bytes_total: u64, data_base64: String },
+    FileChunk {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+        offset: u64,
+        bytes_total: u64,
+        data_base64: String,
+    },
     #[serde(rename = "file_cancel")]
-    FileCancel { from_ip: String, from_port: u16, to_ip: String, to_port: u16, name: String },
+    FileCancel {
+        from_ip: String,
+        from_port: u16,
+        to_ip: String,
+        to_port: u16,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +143,12 @@ struct PendingRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RuntimeConfig {
+    // Full path to certificate.pem or directory containing certificate.pem/private.key
+    #[serde(default)]
     certificate_path: String,
+    // Base URL for server API
+    #[serde(default = "default_base_url")]
+    base_url: String,
 }
 
 fn default_app_data_dir_fallback() -> std::path::PathBuf {
@@ -137,6 +188,7 @@ impl Default for RuntimeConfig {
         let cert = base.join("certificate.pem");
         Self {
             certificate_path: cert.to_string_lossy().to_string(),
+            base_url: default_base_url(),
         }
     }
 }
@@ -149,15 +201,13 @@ struct AppState {
     self_info: Arc<Mutex<Option<ClientInfo>>>,
     #[allow(dead_code)]
     peers: Arc<Mutex<HashMap<String, PeerConn>>>, // key: "ip:port"
-    peer_writers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>>>>, // key: "ip:port" -> writer
+    peer_writers:
+        Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>>>>, // key: "ip:port" -> writer
     // CLI approval flow state
     cli_mode: Arc<Mutex<bool>>,
     cli_auto_allow: Arc<Mutex<bool>>,
     allowed_peers: Arc<Mutex<std::collections::HashSet<String>>>,
     pending_request: Arc<Mutex<Option<PendingRequest>>>,
-    // Certificate and hash for registration
-    cert_pem: Arc<Mutex<Option<String>>>,
-    pkh_hex: Arc<Mutex<Option<String>>>,
     // Runtime config persisted to disk
     config: Arc<Mutex<RuntimeConfig>>,
 }
@@ -235,39 +285,84 @@ async fn connect_to_server(
                                         if let Ok(msg) = serde_json::from_str::<Message>(&line) {
                                             match msg {
                                                 Message::Ping => {
-                                                    let pong = serde_json::to_string(&Message::Pong).unwrap() + "\n";
-                                                    let writer_arc_opt = { pw_map.lock().unwrap().get(&key).cloned() };
+                                                    let pong =
+                                                        serde_json::to_string(&Message::Pong)
+                                                            .unwrap()
+                                                            + "\n";
+                                                    let writer_arc_opt = {
+                                                        pw_map.lock().unwrap().get(&key).cloned()
+                                                    };
                                                     if let Some(w) = writer_arc_opt {
                                                         if let Ok(mut guard) = w.try_lock() {
-                                                            if let Err(e) = guard.write_all(pong.as_bytes()).await { println!("Peer write error: {}", e); break; }
-                                                            if let Err(e) = guard.flush().await { println!("Peer flush error: {}", e); break; }
+                                                            if let Err(e) = guard
+                                                                .write_all(pong.as_bytes())
+                                                                .await
+                                                            {
+                                                                println!("Peer write error: {}", e);
+                                                                break;
+                                                            }
+                                                            if let Err(e) = guard.flush().await {
+                                                                println!("Peer flush error: {}", e);
+                                                                break;
+                                                            }
                                                         }
                                                     }
                                                 }
-                                                Message::DccRequest { from_ip, from_port, .. } => {
+                                                Message::DccRequest {
+                                                    from_ip, from_port, ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     // CLI approval gating
-                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
-                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    let state_ref: tauri::State<AppState> =
+                                                        app_handle_incoming.state::<AppState>();
+                                                    let cli_mode =
+                                                        { *state_ref.cli_mode.lock().unwrap() };
                                                     if cli_mode {
-                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let auto = {
+                                                            *state_ref
+                                                                .cli_auto_allow
+                                                                .lock()
+                                                                .unwrap()
+                                                        };
                                                         let key = peer_key(&from_ip, from_port);
-                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        let already = {
+                                                            state_ref
+                                                                .allowed_peers
+                                                                .lock()
+                                                                .unwrap()
+                                                                .contains(&key)
+                                                        };
                                                         if !already {
                                                             if auto {
-                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                state_ref
+                                                                    .allowed_peers
+                                                                    .lock()
+                                                                    .unwrap()
+                                                                    .insert(key.clone());
                                                                 println!("Auto-allowed DCC chat request from {}:{}", from_ip, from_port);
                                                                 // Optionally notify opened
                                                                 let _ = app_handle_incoming.emit("dcc-opened", serde_json::json!({"ip": from_ip, "port": from_port}));
                                                             } else {
                                                                 // set pending request
                                                                 {
-                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
-                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                                                    let mut pend = state_ref
+                                                                        .pending_request
+                                                                        .lock()
+                                                                        .unwrap();
+                                                                    *pend = Some(PendingRequest {
+                                                                        ip: from_ip.clone(),
+                                                                        port: from_port,
+                                                                        kind: RequestKind::DccChat,
+                                                                    });
                                                                 }
                                                                 println!("Incoming DCC chat request from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
                                                                 // Do not emit to app/UI until allowed
@@ -276,38 +371,86 @@ async fn connect_to_server(
                                                         }
                                                     }
                                                     let payload = serde_json::json!({"ip": from_ip, "port": from_port});
-                                                    let _ = app_handle_incoming.emit("dcc-request", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-request", payload);
                                                 }
-                                                Message::DccOpened { from_ip, from_port, .. } => {
+                                                Message::DccOpened {
+                                                    from_ip, from_port, ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({"ip": from_ip, "port": from_port});
-                                                    let _ = app_handle_incoming.emit("dcc-opened", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-opened", payload);
                                                 }
-                                                Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                                Message::FileOffer {
+                                                    from_ip,
+                                                    from_port,
+                                                    name,
+                                                    size,
+                                                    ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     // CLI approval gating for file offer
-                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
-                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    let state_ref: tauri::State<AppState> =
+                                                        app_handle_incoming.state::<AppState>();
+                                                    let cli_mode =
+                                                        { *state_ref.cli_mode.lock().unwrap() };
                                                     if cli_mode {
-                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let auto = {
+                                                            *state_ref
+                                                                .cli_auto_allow
+                                                                .lock()
+                                                                .unwrap()
+                                                        };
                                                         let key = peer_key(&from_ip, from_port);
-                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        let already = {
+                                                            state_ref
+                                                                .allowed_peers
+                                                                .lock()
+                                                                .unwrap()
+                                                                .contains(&key)
+                                                        };
                                                         if !already {
                                                             if auto {
-                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                state_ref
+                                                                    .allowed_peers
+                                                                    .lock()
+                                                                    .unwrap()
+                                                                    .insert(key.clone());
                                                                 println!("Auto-allowed file offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
                                                             } else {
                                                                 {
-                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
-                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::FileOffer { name: name.clone(), size } });
+                                                                    let mut pend = state_ref
+                                                                        .pending_request
+                                                                        .lock()
+                                                                        .unwrap();
+                                                                    *pend = Some(PendingRequest {
+                                                                        ip: from_ip.clone(),
+                                                                        port: from_port,
+                                                                        kind:
+                                                                            RequestKind::FileOffer {
+                                                                                name: name.clone(),
+                                                                                size,
+                                                                            },
+                                                                    });
                                                                 }
                                                                 println!("Incoming file offer from {}:{} -- '{}' ({} bytes)\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port, name, size);
                                                                 continue;
@@ -315,22 +458,48 @@ async fn connect_to_server(
                                                         }
                                                     }
                                                     let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
-                                                    let _ = app_handle_incoming.emit("dcc-file-offer", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-file-offer", payload);
                                                 }
-                                                Message::FileAccept { from_ip, from_port, name, action, .. } => {
+                                                Message::FileAccept {
+                                                    from_ip,
+                                                    from_port,
+                                                    name,
+                                                    action,
+                                                    ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
-                                                    let _ = app_handle_incoming.emit("dcc-file-accept", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-file-accept", payload);
                                                 }
-                                                Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                                                Message::FileChunk {
+                                                    from_ip,
+                                                    from_port,
+                                                    name,
+                                                    offset,
+                                                    bytes_total,
+                                                    data_base64,
+                                                    ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({
                                                         "from_ip": from_ip,
@@ -340,38 +509,85 @@ async fn connect_to_server(
                                                         "bytes_total": bytes_total,
                                                         "data_base64": data_base64
                                                     });
-                                                    let _ = app_handle_incoming.emit("dcc-file-chunk", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-file-chunk", payload);
                                                 }
-                                                Message::FileCancel { from_ip, from_port, name, .. } => {
+                                                Message::FileCancel {
+                                                    from_ip,
+                                                    from_port,
+                                                    name,
+                                                    ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name});
-                                                    let _ = app_handle_incoming.emit("dcc-file-cancel", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-file-cancel", payload);
                                                 }
-                                                Message::DccChat { from_ip, from_port, text, timestamp, .. } => {
+                                                Message::DccChat {
+                                                    from_ip,
+                                                    from_port,
+                                                    text,
+                                                    timestamp,
+                                                    ..
+                                                } => {
                                                     {
                                                         let alias = peer_key(&from_ip, from_port);
                                                         let mut map = pw_map.lock().unwrap();
-                                                        if !map.contains_key(&alias) { map.insert(alias.clone(), writer_arc.clone()); }
+                                                        if !map.contains_key(&alias) {
+                                                            map.insert(
+                                                                alias.clone(),
+                                                                writer_arc.clone(),
+                                                            );
+                                                        }
                                                     }
                                                     // CLI approval gating for DCC chat message
-                                                    let state_ref: tauri::State<AppState> = app_handle_incoming.state::<AppState>();
-                                                    let cli_mode = { *state_ref.cli_mode.lock().unwrap() };
+                                                    let state_ref: tauri::State<AppState> =
+                                                        app_handle_incoming.state::<AppState>();
+                                                    let cli_mode =
+                                                        { *state_ref.cli_mode.lock().unwrap() };
                                                     if cli_mode {
-                                                        let auto = { *state_ref.cli_auto_allow.lock().unwrap() };
+                                                        let auto = {
+                                                            *state_ref
+                                                                .cli_auto_allow
+                                                                .lock()
+                                                                .unwrap()
+                                                        };
                                                         let key = peer_key(&from_ip, from_port);
-                                                        let already = { state_ref.allowed_peers.lock().unwrap().contains(&key) };
+                                                        let already = {
+                                                            state_ref
+                                                                .allowed_peers
+                                                                .lock()
+                                                                .unwrap()
+                                                                .contains(&key)
+                                                        };
                                                         if !already {
                                                             if auto {
-                                                                state_ref.allowed_peers.lock().unwrap().insert(key.clone());
+                                                                state_ref
+                                                                    .allowed_peers
+                                                                    .lock()
+                                                                    .unwrap()
+                                                                    .insert(key.clone());
                                                                 println!("Auto-allowed DCC chat from {}:{}", from_ip, from_port);
                                                             } else {
                                                                 {
-                                                                    let mut pend = state_ref.pending_request.lock().unwrap();
-                                                                    *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                                                    let mut pend = state_ref
+                                                                        .pending_request
+                                                                        .lock()
+                                                                        .unwrap();
+                                                                    *pend = Some(PendingRequest {
+                                                                        ip: from_ip.clone(),
+                                                                        port: from_port,
+                                                                        kind: RequestKind::DccChat,
+                                                                    });
                                                                 }
                                                                 println!("Incoming DCC chat from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
                                                                 continue;
@@ -384,19 +600,27 @@ async fn connect_to_server(
                                                         "text": text,
                                                         "timestamp": timestamp,
                                                     });
-                                                    let _ = app_handle_incoming.emit("dcc-chat", payload);
+                                                    let _ = app_handle_incoming
+                                                        .emit("dcc-chat", payload);
                                                 }
                                                 _ => {}
                                             }
                                         }
                                     }
-                                    Err(e) => { println!("Peer read error: {}", e); break; }
+                                    Err(e) => {
+                                        println!("Peer read error: {}", e);
+                                        break;
+                                    }
                                 }
                             }
-                            let _ = app_handle_incoming.emit("peer-incoming-closed", format!("{}", remote));
+                            let _ = app_handle_incoming
+                                .emit("peer-incoming-closed", format!("{}", remote));
                         });
                     }
-                    Err(e) => { println!("Listener accept error: {}", e); break; }
+                    Err(e) => {
+                        println!("Listener accept error: {}", e);
+                        break;
+                    }
                 }
             }
         });
@@ -406,17 +630,18 @@ async fn connect_to_server(
     let _ = app_handle.emit("log", format!("Connecting to server at {}", addr));
 
     // Connect to server with 15s timeout
-    let stream = match tokio::time::timeout(Duration::from_secs(15), TcpStream::connect(&addr)).await {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            let _ = app_handle.emit("log", format!("Failed to connect: {}", e));
-            return Err(format!("Failed to connect: {}", e));
-        }
-        Err(_) => {
-            let _ = app_handle.emit("log", "Connect timeout after 15s".to_string());
-            return Err("Connect timeout after 15s".to_string());
-        }
-    };
+    let stream =
+        match tokio::time::timeout(Duration::from_secs(15), TcpStream::connect(&addr)).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                let _ = app_handle.emit("log", format!("Failed to connect: {}", e));
+                return Err(format!("Failed to connect: {}", e));
+            }
+            Err(_) => {
+                let _ = app_handle.emit("log", "Connect timeout after 15s".to_string());
+                return Err("Connect timeout after 15s".to_string());
+            }
+        };
 
     println!("Connected to server");
     let _ = app_handle.emit("log", format!("Connected to {}", addr));
@@ -472,13 +697,22 @@ async fn connect_to_server(
                             Message::ClientList { clients } => {
                                 // In CLI mode, print full client list for visibility
                                 let print_details = {
-                                    let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                    let st: tauri::State<AppState> =
+                                        app_handle_clone.state::<AppState>();
                                     let val = *st.cli_mode.lock().unwrap();
                                     val
                                 };
                                 if print_details {
-                                    let list_str = clients.iter().map(|c| format!("{}:{}", c.local_ip, c.port)).collect::<Vec<_>>().join(", ");
-                                    println!("Received client list ({}): {}", clients.len(), list_str);
+                                    let list_str = clients
+                                        .iter()
+                                        .map(|c| format!("{}:{}", c.local_ip, c.port))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    println!(
+                                        "Received client list ({}): {}",
+                                        clients.len(),
+                                        list_str
+                                    );
                                 } else {
                                     println!("Received client list: {} clients", clients.len());
                                 }
@@ -497,16 +731,25 @@ async fn connect_to_server(
                                     .map(|c| {
                                         if let Some(ref me) = self_opt {
                                             if me.local_ip == c.local_ip && me.port == c.port {
-                                                return EnrichedClientInfo { local_ip: c.local_ip.clone(), remote_ip: c.remote_ip.clone(), port: c.port, peer_status: "self".to_string() };
+                                                return EnrichedClientInfo {
+                                                    local_ip: c.local_ip.clone(),
+                                                    remote_ip: c.remote_ip.clone(),
+                                                    port: c.port,
+                                                    peer_status: "self".to_string(),
+                                                };
                                             }
                                         }
-                                        EnrichedClientInfo { local_ip: c.local_ip.clone(), remote_ip: c.remote_ip.clone(), port: c.port, peer_status: "disconnected".to_string() }
+                                        EnrichedClientInfo {
+                                            local_ip: c.local_ip.clone(),
+                                            remote_ip: c.remote_ip.clone(),
+                                            port: c.port,
+                                            peer_status: "disconnected".to_string(),
+                                        }
                                     })
                                     .collect();
                                 let _ = app_handle_clone.emit("client-list-updated", enriched);
                                 // Skip auto-connecting logic to ensure both clients show disconnected on boot
                                 continue;
-
                             }
                             Message::Pong => {
                                 println!("💓 Received pong from server");
@@ -514,7 +757,8 @@ async fn connect_to_server(
                             Message::ServerInfo { version } => {
                                 let info_json = serde_json::json!({"version": version});
                                 println!("ℹ️ Server info: {}", info_json);
-                                let _ = app_handle_clone.emit("log", format!("Server info: {}", info_json));
+                                let _ = app_handle_clone
+                                    .emit("log", format!("Server info: {}", info_json));
                             }
                             Message::Chat {
                                 from_ip,
@@ -536,22 +780,33 @@ async fn connect_to_server(
                                 });
                                 let _ = app_handle_clone.emit("chat-message", chat_data);
                             }
-                            Message::DccRequest { from_ip, from_port, .. } => {
+                            Message::DccRequest {
+                                from_ip, from_port, ..
+                            } => {
                                 // CLI approval gating
-                                let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                let st: tauri::State<AppState> =
+                                    app_handle_clone.state::<AppState>();
                                 let is_cli = { *st.cli_mode.lock().unwrap() };
                                 if is_cli {
                                     let auto = { *st.cli_auto_allow.lock().unwrap() };
                                     let key = peer_key(&from_ip, from_port);
-                                    let already = { st.allowed_peers.lock().unwrap().contains(&key) };
+                                    let already =
+                                        { st.allowed_peers.lock().unwrap().contains(&key) };
                                     if !already {
                                         if auto {
                                             st.allowed_peers.lock().unwrap().insert(key.clone());
-                                            println!("Auto-allowed DCC chat request from {}:{}", from_ip, from_port);
+                                            println!(
+                                                "Auto-allowed DCC chat request from {}:{}",
+                                                from_ip, from_port
+                                            );
                                         } else {
                                             {
                                                 let mut pend = st.pending_request.lock().unwrap();
-                                                *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::DccChat });
+                                                *pend = Some(PendingRequest {
+                                                    ip: from_ip.clone(),
+                                                    port: from_port,
+                                                    kind: RequestKind::DccChat,
+                                                });
                                             }
                                             println!("Incoming DCC chat request from {}:{}\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port);
                                             continue;
@@ -562,19 +817,32 @@ async fn connect_to_server(
                                 let payload = serde_json::json!({"ip": from_ip, "port": from_port});
                                 let _ = app_handle_clone.emit("dcc-request", payload);
                             }
-                            Message::DccOpened { from_ip, from_port, .. } => {
-                                println!("🪟 DCC opened notification from {}:{}", from_ip, from_port);
+                            Message::DccOpened {
+                                from_ip, from_port, ..
+                            } => {
+                                println!(
+                                    "🪟 DCC opened notification from {}:{}",
+                                    from_ip, from_port
+                                );
                                 let payload = serde_json::json!({"ip": from_ip, "port": from_port});
                                 let _ = app_handle_clone.emit("dcc-opened", payload);
                             }
-                            Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                            Message::FileOffer {
+                                from_ip,
+                                from_port,
+                                name,
+                                size,
+                                ..
+                            } => {
                                 // CLI approval gating
-                                let st: tauri::State<AppState> = app_handle_clone.state::<AppState>();
+                                let st: tauri::State<AppState> =
+                                    app_handle_clone.state::<AppState>();
                                 let is_cli = { *st.cli_mode.lock().unwrap() };
                                 if is_cli {
                                     let auto = { *st.cli_auto_allow.lock().unwrap() };
                                     let key = peer_key(&from_ip, from_port);
-                                    let already = { st.allowed_peers.lock().unwrap().contains(&key) };
+                                    let already =
+                                        { st.allowed_peers.lock().unwrap().contains(&key) };
                                     if !already {
                                         if auto {
                                             st.allowed_peers.lock().unwrap().insert(key.clone());
@@ -582,23 +850,50 @@ async fn connect_to_server(
                                         } else {
                                             {
                                                 let mut pend = st.pending_request.lock().unwrap();
-                                                *pend = Some(PendingRequest{ ip: from_ip.clone(), port: from_port, kind: RequestKind::FileOffer { name: name.clone(), size } });
+                                                *pend = Some(PendingRequest {
+                                                    ip: from_ip.clone(),
+                                                    port: from_port,
+                                                    kind: RequestKind::FileOffer {
+                                                        name: name.clone(),
+                                                        size,
+                                                    },
+                                                });
                                             }
                                             println!("Incoming file offer from {}:{} -- '{}' ({} bytes)\nType 'allow' to accept, 'deny' to reject, or 'allow auto' to accept all for this session.", from_ip, from_port, name, size);
                                             continue;
                                         }
                                     }
                                 }
-                                println!("📁 File offer from {}:{} [{} - {} bytes]", from_ip, from_port, name, size);
+                                println!(
+                                    "📁 File offer from {}:{} [{} - {} bytes]",
+                                    from_ip, from_port, name, size
+                                );
                                 let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
                                 let _ = app_handle_clone.emit("dcc-file-offer", payload);
                             }
-                            Message::FileAccept { from_ip, from_port, name, action, .. } => {
-                                println!("✅ File accept received from {}:{} [{} action={}]", from_ip, from_port, name, action);
+                            Message::FileAccept {
+                                from_ip,
+                                from_port,
+                                name,
+                                action,
+                                ..
+                            } => {
+                                println!(
+                                    "✅ File accept received from {}:{} [{} action={}]",
+                                    from_ip, from_port, name, action
+                                );
                                 let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
                                 let _ = app_handle_clone.emit("dcc-file-accept", payload);
                             }
-                            Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                            Message::FileChunk {
+                                from_ip,
+                                from_port,
+                                name,
+                                offset,
+                                bytes_total,
+                                data_base64,
+                                ..
+                            } => {
                                 let payload = serde_json::json!({
                                     "from_ip": from_ip,
                                     "from_port": from_port,
@@ -609,7 +904,12 @@ async fn connect_to_server(
                                 });
                                 let _ = app_handle_clone.emit("dcc-file-chunk", payload);
                             }
-                            Message::FileCancel { from_ip, from_port, name, .. } => {
+                            Message::FileCancel {
+                                from_ip,
+                                from_port,
+                                name,
+                                ..
+                            } => {
                                 let payload = serde_json::json!({
                                     "from_ip": from_ip,
                                     "from_port": from_port,
@@ -689,16 +989,29 @@ fn get_clients(state: State<'_, AppState>) -> Vec<ClientInfo> {
 }
 
 // P2P DCC: peer connection and messaging commands
-fn peer_key(ip: &str, port: u16) -> String { format!("{}:{}", ip, port) }
+fn peer_key(ip: &str, port: u16) -> String {
+    format!("{}:{}", ip, port)
+}
 
-async fn send_to_peer(state: &State<'_, AppState>, ip: &str, port: u16, msg: &Message) -> Result<(), String> {
+async fn send_to_peer(
+    state: &State<'_, AppState>,
+    ip: &str,
+    port: u16,
+    msg: &Message,
+) -> Result<(), String> {
     let key = peer_key(ip, port);
     let json = serde_json::to_string(msg).map_err(|e| e.to_string())? + "\n";
     let writer_opt = { state.peer_writers.lock().unwrap().get(&key).cloned() };
     if let Some(writer_mutex) = writer_opt {
         let mut guard = writer_mutex.lock().await;
-        guard.write_all(json.as_bytes()).await.map_err(|e| format!("write error: {}", e))?;
-        guard.flush().await.map_err(|e| format!("flush error: {}", e))?;
+        guard
+            .write_all(json.as_bytes())
+            .await
+            .map_err(|e| format!("write error: {}", e))?;
+        guard
+            .flush()
+            .await
+            .map_err(|e| format!("flush error: {}", e))?;
         Ok(())
     } else {
         Err("Peer not connected".into())
@@ -706,7 +1019,12 @@ async fn send_to_peer(state: &State<'_, AppState>, ip: &str, port: u16, msg: &Me
 }
 
 #[tauri::command]
-async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
+async fn connect_to_peer(
+    to_ip: String,
+    to_port: u16,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     let addr = format!("{}:{}", to_ip, to_port);
     let addr_clone = addr.clone();
     match TcpStream::connect(&addr).await {
@@ -715,7 +1033,10 @@ async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>
             // store writer
             {
                 let mut map = state.peer_writers.lock().unwrap();
-                map.insert(peer_key(&to_ip, to_port), Arc::new(tokio::sync::Mutex::new(writer)));
+                map.insert(
+                    peer_key(&to_ip, to_port),
+                    Arc::new(tokio::sync::Mutex::new(writer)),
+                );
             }
             // spawn reader loop
             let app_handle_clone = app_handle.clone();
@@ -735,23 +1056,49 @@ async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>
                                     Message::Pong => {
                                         let _ = app_handle_clone.emit("peer-pong", &addr_clone);
                                     }
-                                    Message::DccRequest { from_ip, from_port, .. } => {
-                                        let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                    Message::DccRequest {
+                                        from_ip, from_port, ..
+                                    } => {
+                                        let payload =
+                                            serde_json::json!({"ip": from_ip, "port": from_port});
                                         let _ = app_handle_clone.emit("dcc-request", payload);
                                     }
-                                    Message::DccOpened { from_ip, from_port, .. } => {
-                                        let payload = serde_json::json!({"ip": from_ip, "port": from_port});
+                                    Message::DccOpened {
+                                        from_ip, from_port, ..
+                                    } => {
+                                        let payload =
+                                            serde_json::json!({"ip": from_ip, "port": from_port});
                                         let _ = app_handle_clone.emit("dcc-opened", payload);
                                     }
-                                    Message::FileOffer { from_ip, from_port, name, size, .. } => {
+                                    Message::FileOffer {
+                                        from_ip,
+                                        from_port,
+                                        name,
+                                        size,
+                                        ..
+                                    } => {
                                         let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "size": size});
                                         let _ = app_handle_clone.emit("dcc-file-offer", payload);
                                     }
-                                    Message::FileAccept { from_ip, from_port, name, action, .. } => {
+                                    Message::FileAccept {
+                                        from_ip,
+                                        from_port,
+                                        name,
+                                        action,
+                                        ..
+                                    } => {
                                         let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name, "action": action});
                                         let _ = app_handle_clone.emit("dcc-file-accept", payload);
                                     }
-                                    Message::FileChunk { from_ip, from_port, name, offset, bytes_total, data_base64, .. } => {
+                                    Message::FileChunk {
+                                        from_ip,
+                                        from_port,
+                                        name,
+                                        offset,
+                                        bytes_total,
+                                        data_base64,
+                                        ..
+                                    } => {
                                         let payload = serde_json::json!({
                                             "from_ip": from_ip,
                                             "from_port": from_port,
@@ -762,11 +1109,22 @@ async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>
                                         });
                                         let _ = app_handle_clone.emit("dcc-file-chunk", payload);
                                     }
-                                    Message::FileCancel { from_ip, from_port, name, .. } => {
+                                    Message::FileCancel {
+                                        from_ip,
+                                        from_port,
+                                        name,
+                                        ..
+                                    } => {
                                         let payload = serde_json::json!({"from_ip": from_ip, "from_port": from_port, "name": name});
                                         let _ = app_handle_clone.emit("dcc-file-cancel", payload);
                                     }
-                                    Message::DccChat { from_ip, from_port, text, timestamp, .. } => {
+                                    Message::DccChat {
+                                        from_ip,
+                                        from_port,
+                                        text,
+                                        timestamp,
+                                        ..
+                                    } => {
                                         let payload = serde_json::json!({
                                             "from_ip": from_ip,
                                             "from_port": from_port,
@@ -791,58 +1149,177 @@ async fn connect_to_peer(to_ip: String, to_port: u16, state: State<'_, AppState>
 }
 
 #[tauri::command]
-async fn peer_send_dcc_request(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::DccRequest { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+async fn peer_send_dcc_request(
+    to_ip: String,
+    to_port: u16,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::DccRequest {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_dcc_opened(to_ip: String, to_port: u16, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::DccOpened { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port };
+async fn peer_send_dcc_opened(
+    to_ip: String,
+    to_port: u16,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::DccOpened {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_file_offer(to_ip: String, to_port: u16, name: String, size: u64, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileOffer { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, size };
+async fn peer_send_file_offer(
+    to_ip: String,
+    to_port: u16,
+    name: String,
+    size: u64,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::FileOffer {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+        name,
+        size,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_file_accept(to_ip: String, to_port: u16, name: String, action: String, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileAccept { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, action };
+async fn peer_send_file_accept(
+    to_ip: String,
+    to_port: u16,
+    name: String,
+    action: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::FileAccept {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+        name,
+        action,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_file_chunk(to_ip: String, to_port: u16, name: String, offset: u64, bytes_total: u64, data_base64: String, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileChunk { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name, offset, bytes_total, data_base64 };
+async fn peer_send_file_chunk(
+    to_ip: String,
+    to_port: u16,
+    name: String,
+    offset: u64,
+    bytes_total: u64,
+    data_base64: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::FileChunk {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+        name,
+        offset,
+        bytes_total,
+        data_base64,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_file_cancel(to_ip: String, to_port: u16, name: String, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
-    let msg = Message::FileCancel { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, name };
+async fn peer_send_file_cancel(
+    to_ip: String,
+    to_port: u16,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
+    let msg = Message::FileCancel {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+        name,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
 
 #[tauri::command]
-async fn peer_send_dcc_chat(to_ip: String, to_port: u16, text: String, state: State<'_, AppState>) -> Result<String, String> {
-    let self_opt = state.self_info.lock().unwrap().clone().ok_or("Self not set")?;
+async fn peer_send_dcc_chat(
+    to_ip: String,
+    to_port: u16,
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let self_opt = state
+        .self_info
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Self not set")?;
     let timestamp = chrono::Utc::now().to_rfc3339();
-    let msg = Message::DccChat { from_ip: self_opt.local_ip, from_port: self_opt.port, to_ip: to_ip.clone(), to_port, text, timestamp };
+    let msg = Message::DccChat {
+        from_ip: self_opt.local_ip,
+        from_port: self_opt.port,
+        to_ip: to_ip.clone(),
+        to_port,
+        text,
+        timestamp,
+    };
     send_to_peer(&state, &to_ip, to_port, &msg).await?;
     Ok("sent".into())
 }
@@ -897,7 +1374,9 @@ fn load_config_from_disk() -> RuntimeConfig {
 
 fn save_config_to_disk(cfg: &RuntimeConfig) {
     let p = config_file_path();
-    if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let _ = std::fs::write(p, serde_json::to_string_pretty(cfg).unwrap_or_default());
 }
 
@@ -917,6 +1396,30 @@ fn logs_dir_from_app(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBu
     app_data_dir_from_handle(app_handle).join(".log")
 }
 
+fn cert_dir_from_config(cfg: &RuntimeConfig) -> std::path::PathBuf {
+    let path_raw = cfg.certificate_path.clone();
+    let p = if path_raw.trim().is_empty() {
+        default_app_data_dir_fallback()
+    } else {
+        std::path::PathBuf::from(path_raw)
+    };
+    if path_is_dir_like(&p) {
+        p
+    } else {
+        p.parent()
+            .map(|x| x.to_path_buf())
+            .unwrap_or_else(|| default_app_data_dir_fallback())
+    }
+}
+
+fn read_pkh_from_config(cfg: &RuntimeConfig) -> Result<String, String> {
+    let dir = cert_dir_from_config(cfg);
+    let hash_path = dir.join("publicKeyHash.txt");
+    let pkh = std::fs::read_to_string(&hash_path)
+        .map_err(|e| format!("No publicKeyHash.txt at {}: {}", hash_path.to_string_lossy(), e))?;
+    Ok(pkh.trim().to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UiGenArgs {
     email: String,
@@ -926,25 +1429,28 @@ struct UiGenArgs {
     bits: Option<u32>,
     #[serde(default)]
     friendlyName: Option<String>,
-    savePath: String,
+    #[serde(default)]
+    savePath: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UiGenResult {
-    certPem: String,
-    privateKeyPemPath: String,
+    status: String, // 'missing' | 'invalid' | 'valid'
+    privateKeyPath: String,
     certPemPath: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UiCheckResult {
-    exists: bool,
-    #[serde(default)]
-    certPem: Option<String>,
+    status: String, // 'missing' | 'invalid' | 'valid'
+    privateKeyPath: String,
+    certPemPath: String,
 }
 
 fn path_is_dir_like(p: &std::path::Path) -> bool {
-    if let Ok(meta) = std::fs::metadata(p) { return meta.is_dir(); }
+    if let Ok(meta) = std::fs::metadata(p) {
+        return meta.is_dir();
+    }
     // Heuristic: trailing separator implies directory
     let s = p.to_string_lossy();
     s.ends_with('/') || s.ends_with('\\')
@@ -956,14 +1462,21 @@ fn resolve_output_dir(save_path: &str) -> std::path::PathBuf {
         return p;
     }
     // If it looks like a file path (e.g., ends with .pem or .key), use its parent
-    p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."))
+    p.parent()
+        .map(|x| x.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 #[tauri::command]
-async fn ui_check_key_exists(config_path: String) -> Result<UiCheckResult, String> {
-    // Support both directory and file inputs.
-    let p = std::path::PathBuf::from(&config_path);
-    let (dir, priv_path, cert_path) = if path_is_dir_like(&p) {
+async fn ui_load_private_key(state: State<'_, AppState>) -> Result<UiCheckResult, String> {
+    let cfg_cur = state.config.lock().unwrap().clone();
+    let path_raw = cfg_cur.certificate_path.clone();
+    let p = if path_raw.trim().is_empty() {
+        default_app_data_dir_fallback()
+    } else {
+        std::path::PathBuf::from(path_raw)
+    };
+    let (_dir, priv_path, cert_path) = if path_is_dir_like(&p) {
         let d = p;
         let privp = d.join("private.key");
         let certp = d.join("certificate.pem");
@@ -971,37 +1484,97 @@ async fn ui_check_key_exists(config_path: String) -> Result<UiCheckResult, Strin
     } else {
         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if name.ends_with(".key") {
-            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            let d = p
+                .parent()
+                .map(|x| x.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
             (d.clone(), p.clone(), d.join("certificate.pem"))
         } else if name.ends_with(".pem") {
-            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            let d = p
+                .parent()
+                .map(|x| x.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
             (d.clone(), d.join("private.key"), p.clone())
         } else {
             // Unknown file name; treat parent as dir
-            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            let d = p
+                .parent()
+                .map(|x| x.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
             (d.clone(), d.join("private.key"), d.join("certificate.pem"))
         }
     };
-    let exists = priv_path.exists();
-    let cert_pem = if cert_path.exists() {
-        std::fs::read_to_string(&cert_path).ok()
-    } else { None };
-    Ok(UiCheckResult { exists, certPem: cert_pem })
+    // Determine status
+    let status = if !priv_path.exists() || !cert_path.exists() {
+        "missing".to_string()
+    } else {
+        match std::fs::read_to_string(&cert_path) {
+            Ok(cert_pem_str) => {
+                let der = pem_to_der(&cert_pem_str).unwrap_or_default();
+                if der.is_empty() {
+                    "invalid".to_string()
+                } else {
+                    "valid".to_string()
+                }
+            }
+            Err(_) => "invalid".to_string(),
+        }
+    };
+
+    Ok(UiCheckResult {
+        status,
+        privateKeyPath: priv_path.to_string_lossy().to_string(),
+        certPemPath: cert_path.to_string_lossy().to_string(),
+    })
 }
 
 #[tauri::command]
-async fn ui_generate_user_keys_and_cert(args: UiGenArgs, state: State<'_, AppState>) -> Result<UiGenResult, String> {
-    let out_dir = resolve_output_dir(&args.savePath);
+async fn ui_generate_user_keys_and_cert(
+    args: UiGenArgs,
+    state: State<'_, AppState>,
+) -> Result<UiGenResult, String> {
+    // Determine output dir from provided savePath or fallback to runtime config certificate_path, then to app data dir
+    let provided = args.savePath.unwrap_or_default();
+    let provided_trim = provided.trim().to_string();
+    let out_dir = if provided_trim.is_empty() {
+        // Use runtime config path if set; otherwise fallback
+        let cfg_cur = state.config.lock().unwrap().clone();
+        let path_raw = cfg_cur.certificate_path.clone();
+        let base = if path_raw.trim().is_empty() {
+            default_app_data_dir_fallback()
+        } else {
+            std::path::PathBuf::from(path_raw)
+        };
+        if path_is_dir_like(&base) {
+            base
+        } else {
+            base.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| default_app_data_dir_fallback())
+        }
+    } else {
+        resolve_output_dir(&provided_trim)
+    };
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("Failed to create dir: {}", e))?;
     // Build certificate with rcgen; ignore password/bits for now
     let mut params = rcgen::CertificateParams::default();
-    params.subject_alt_names.push(rcgen::SanType::Rfc822Name(args.email.clone()));
-    params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", args.email));
+    params
+        .subject_alt_names
+        .push(rcgen::SanType::Rfc822Name(args.email.clone()));
+    params.distinguished_name.push(
+        rcgen::DnType::CommonName,
+        format!("Flashback Test {}", args.email),
+    );
     // Choose algorithm default ECDSA; friendlyName/bits not used currently
     params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
-    let cert = rcgen::Certificate::from_params(params).map_err(|e| format!("Generate cert error: {}", e))?;
-    let pem = cert.serialize_pem().map_err(|e| format!("Serialize PEM error: {}", e))?;
-    let der = cert.serialize_der().map_err(|e| format!("Serialize DER error: {}", e))?;
+    let cert = rcgen::Certificate::from_params(params)
+        .map_err(|e| format!("Generate cert error: {}", e))?;
+    let pem = cert
+        .serialize_pem()
+        .map_err(|e| format!("Serialize PEM error: {}", e))?;
+    let der = cert
+        .serialize_der()
+        .map_err(|e| format!("Serialize DER error: {}", e))?;
     let priv_pem = cert.serialize_private_key_pem();
     // Compute PKH (SHA-256 over DER)
     let mut hasher = Sha256::new();
@@ -1012,17 +1585,11 @@ async fn ui_generate_user_keys_and_cert(args: UiGenArgs, state: State<'_, AppSta
     let priv_path = out_dir.join("private.key");
     let hash_path = out_dir.join("publicKeyHash.txt");
     std::fs::write(&cert_path, &pem).map_err(|e| format!("Write certificate.pem failed: {}", e))?;
-    std::fs::write(&priv_path, &priv_pem).map_err(|e| format!("Write private.key failed: {}", e))?;
-    std::fs::write(&hash_path, &pkh).map_err(|e| format!("Write publicKeyHash.txt failed: {}", e))?;
-    // Update state and persist config certificate_path -> certificate.pem
-    {
-        let mut c = state.cert_pem.lock().unwrap();
-        *c = Some(pem.clone());
-    }
-    {
-        let mut h = state.pkh_hex.lock().unwrap();
-        *h = Some(pkh.clone());
-    }
+    std::fs::write(&priv_path, &priv_pem)
+        .map_err(|e| format!("Write private.key failed: {}", e))?;
+    std::fs::write(&hash_path, &pkh)
+        .map_err(|e| format!("Write publicKeyHash.txt failed: {}", e))?;
+    // Persist config certificate_path -> certificate.pem (no PKH in state)
     {
         let mut cfg = state.config.lock().unwrap().clone();
         cfg.certificate_path = cert_path.to_string_lossy().to_string();
@@ -1030,9 +1597,11 @@ async fn ui_generate_user_keys_and_cert(args: UiGenArgs, state: State<'_, AppSta
         *guard = cfg.clone();
         save_config_to_disk(&cfg);
     }
+    // Verify and report status without loading cert into persistent state
+    let check = ui_load_private_key(state).await?;
     Ok(UiGenResult {
-        certPem: pem,
-        privateKeyPemPath: priv_path.to_string_lossy().to_string(),
+        status: check.status,
+        privateKeyPath: priv_path.to_string_lossy().to_string(),
         certPemPath: cert_path.to_string_lossy().to_string(),
     })
 }
@@ -1051,9 +1620,7 @@ fn main() {
         cli_auto_allow: Arc::new(Mutex::new(false)),
         allowed_peers: Arc::new(Mutex::new(std::collections::HashSet::new())),
         pending_request: Arc::new(Mutex::new(None)),
-        cert_pem: Arc::new(Mutex::new(None)),
-        pkh_hex: Arc::new(Mutex::new(None)),
-        config: Arc::new(Mutex::new(initial_cfg)),
+        config: Arc::new(Mutex::new(initial_cfg)), 
     };
 
     let args: Vec<String> = std::env::args().collect();
@@ -1083,7 +1650,7 @@ fn main() {
                 api_register,
                 api_ready,
                 api_lookup,
-                ui_check_key_exists,
+                ui_load_private_key,
                 ui_generate_user_keys_and_cert
             ])
             .build(tauri::generate_context!())
@@ -1100,39 +1667,53 @@ fn main() {
             }
             // Handle optional startup certificate generation: --gen-cert=<email>
             // Support startup generation via --gen-key=<email> or legacy --gen-cert=<email>
-            let startup_email = if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-key=")) {
-                gen_arg.split_once('=').map(|(_, e)| e.to_string())
-            } else if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-cert=")) {
-                gen_arg.split_once('=').map(|(_, e)| e.to_string())
-            } else { None };
+            let startup_email =
+                if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-key=")) {
+                    gen_arg.split_once('=').map(|(_, e)| e.to_string())
+                } else if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-cert=")) {
+                    gen_arg.split_once('=').map(|(_, e)| e.to_string())
+                } else {
+                    None
+                };
             if let Some(email) = startup_email {
                 // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
                 let mut params = rcgen::CertificateParams::default();
-                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.to_string()));
                 params
-                    .distinguished_name
-                    .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                    .subject_alt_names
+                    .push(rcgen::SanType::Rfc822Name(email.to_string()));
+                params.distinguished_name.push(
+                    rcgen::DnType::CommonName,
+                    format!("Flashback Test {}", email),
+                );
                 match rcgen::Certificate::from_params(params) {
                     Ok(cert) => {
-                        let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); String::new() } };
-                        let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); Vec::new() } };
+                        let pem = match cert.serialize_pem() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                println!("Error serializing PEM: {}", e);
+                                String::new()
+                            }
+                        };
+                        let der = match cert.serialize_der() {
+                            Ok(d) => d,
+                            Err(e) => {
+                                println!("Error serializing DER: {}", e);
+                                Vec::new()
+                            }
+                        };
                         let priv_pem = cert.serialize_private_key_pem();
                         if !pem.is_empty() && !der.is_empty() {
                             let mut hasher = Sha256::new();
                             hasher.update(&der);
                             let pkh = hex_crate::encode(hasher.finalize());
-                            {
-                                let mut c = st.cert_pem.lock().unwrap();
-                                *c = Some(pem.clone());
-                            }
-                            {
-                                let mut h = st.pkh_hex.lock().unwrap();
-                                *h = Some(pkh.clone());
-                            }
                             // Determine output directory from runtime config (same dir as certificate_path)
                             let cfg_cur = st.config.lock().unwrap().clone();
-                            let cert_path_cur = std::path::PathBuf::from(cfg_cur.certificate_path.clone());
-                            let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                            let cert_path_cur =
+                                std::path::PathBuf::from(cfg_cur.certificate_path.clone());
+                            let out_dir = cert_path_cur
+                                .parent()
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| std::path::PathBuf::from("."));
                             let _ = std::fs::create_dir_all(&out_dir);
                             let cert_path = out_dir.join("certificate.pem");
                             let priv_path = out_dir.join("private.key");
@@ -1141,7 +1722,11 @@ fn main() {
                             let _ = std::fs::write(&priv_path, &priv_pem);
                             let _ = std::fs::write(&hash_path, &pkh);
                             // Also write legacy PKH file into logs dir for backward compatibility
-                            let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                            let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+                                std::path::PathBuf::from(dir)
+                            } else {
+                                logs_dir_from_app(None)
+                            };
                             let _ = std::fs::create_dir_all(&ld);
                             ld.push(format!("pkh-{}.txt", std::process::id()));
                             let _ = std::fs::write(&ld, &pkh);
@@ -1165,7 +1750,7 @@ fn main() {
                 // Start listener before entering interactive loop
                 let ah = app.handle();
                 let st2 = app.state::<AppState>();
-                let _ = tauri::async_runtime::block_on(start_peer_listener_async(st2, ah.clone()));
+                let _ = tauri::async_runtime::block_on(start_peer_listener_async(st2, ah.clone(), None, None));
             }
         }
         run_cli(app);
@@ -1177,6 +1762,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             connect_to_server,
@@ -1195,8 +1781,9 @@ fn main() {
             api_register,
             api_ready,
             api_lookup,
-            ui_check_key_exists,
-            ui_generate_user_keys_and_cert
+            ui_load_private_key,
+            ui_generate_user_keys_and_cert,
+            api_register_json
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1224,7 +1811,7 @@ fn print_cli_help() {
     println!("  deny                 Reject the pending incoming chat/transfer request");
     println!("  gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]\n                       Generate or reuse a key: writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
     println!("  gen-cert <email>      (alias) Generate a self-signed cert and private key; writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
-    println!("  set-cert-path <path> Set Config.certificatePath (file path). If a directory is provided, 'certificate.pem' will be appended");
+    println!("  set-cert-path <path> Set Config.privateKeyPath (file path). If a directory is provided, 'certificate.pem' will be appended");
     println!("  print-cert           Print the generated certificate PEM between markers");
     println!("  print-pkh            Print the SHA-256 hash of DER certificate as hex (lowercase)");
     println!("  start-listener       Start the peer listener on an ephemeral port (no server connection)");
@@ -1239,20 +1826,29 @@ fn parse_host_port(input: &str) -> Result<(String, u16), String> {
     let port_str = parts.next().ok_or_else(|| "missing port".to_string())?;
     let host = parts.next().ok_or_else(|| "missing host".to_string())?;
     let port: u16 = port_str.parse().map_err(|_| "invalid port".to_string())?;
-    if host.is_empty() { return Err("missing host".to_string()); }
+    if host.is_empty() {
+        return Err("missing host".to_string());
+    }
     Ok((host.to_string(), port))
 }
 
-
-async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<u16, String> {
+async fn start_peer_listener_async(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    bind_host: Option<String>,
+    bind_port: Option<u16>,
+) -> Result<u16, String> {
     // Detect local client IP
     let client_ip = local_ip_address::local_ip()
         .map_err(|e| format!("Failed to determine local IP: {}", e))?
         .to_string();
-    // Bind ephemeral port
-    let listener = TcpListener::bind("0.0.0.0:0")
+    // Bind configured or ephemeral port
+    let host = bind_host.unwrap_or_else(|| "0.0.0.0".to_string());
+    let port = bind_port.unwrap_or(0);
+    let bind_addr = format!("{}:{}", host, port);
+    let listener = TcpListener::bind(&bind_addr)
         .await
-        .map_err(|e| format!("Failed to bind peer listener: {}", e))?;
+        .map_err(|e| format!("Failed to bind peer listener at {}: {}", bind_addr, e))?;
     let actual_port = listener
         .local_addr()
         .map_err(|e| format!("Failed to get listener local addr: {}", e))?
@@ -1260,7 +1856,11 @@ async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri
     // Save self info
     {
         let mut self_lock = state.self_info.lock().unwrap();
-        *self_lock = Some(ClientInfo { local_ip: client_ip.clone(), remote_ip: "".to_string(), port: actual_port });
+        *self_lock = Some(ClientInfo {
+            local_ip: client_ip.clone(),
+            remote_ip: "".to_string(),
+            port: actual_port,
+        });
     }
     // Persist the listener port to a file inside logs dir
     let pid = std::process::id();
@@ -1305,12 +1905,26 @@ async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri
                                         if let Ok(msg) = serde_json::from_str::<Message>(&line) {
                                             match msg {
                                                 Message::Ping => {
-                                                    let pong = serde_json::to_string(&Message::Pong).unwrap() + "\n";
-                                                    let writer_arc_opt = { pw_map.lock().unwrap().get(&key).cloned() };
+                                                    let pong =
+                                                        serde_json::to_string(&Message::Pong)
+                                                            .unwrap()
+                                                            + "\n";
+                                                    let writer_arc_opt = {
+                                                        pw_map.lock().unwrap().get(&key).cloned()
+                                                    };
                                                     if let Some(w) = writer_arc_opt {
                                                         if let Ok(mut guard) = w.try_lock() {
-                                                            if let Err(e) = guard.write_all(pong.as_bytes()).await { println!("Peer write error: {}", e); break; }
-                                                            if let Err(e) = guard.flush().await { println!("Peer flush error: {}", e); break; }
+                                                            if let Err(e) = guard
+                                                                .write_all(pong.as_bytes())
+                                                                .await
+                                                            {
+                                                                println!("Peer write error: {}", e);
+                                                                break;
+                                                            }
+                                                            if let Err(e) = guard.flush().await {
+                                                                println!("Peer flush error: {}", e);
+                                                                break;
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -1335,14 +1949,24 @@ async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri
 }
 
 fn logs_dir_env() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { std::path::PathBuf::from(".") }
+    if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+        std::path::PathBuf::from(dir)
+    } else {
+        std::path::PathBuf::from(".")
+    }
 }
 
 fn debug_http_enabled() -> bool {
-    matches!(std::env::var("CLIENT_DEBUG").ok().as_deref(), Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("on"))
+    matches!(
+        std::env::var("CLIENT_DEBUG").ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("on")
+    )
 }
 
-async fn http_post_json(url: &str, body: serde_json::Value) -> Result<(StatusCode, serde_json::Value), String> {
+async fn http_post_json(
+    url: &str,
+    body: serde_json::Value,
+) -> Result<(StatusCode, serde_json::Value), String> {
     if debug_http_enabled() {
         println!("[HTTP DEBUG] POST {}\nRequest: {}", url, body);
     }
@@ -1354,10 +1978,19 @@ async fn http_post_json(url: &str, body: serde_json::Value) -> Result<(StatusCod
         .await
         .map_err(|e| format!("HTTP POST failed: {}", e))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
-    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
     if debug_http_enabled() {
-        println!("[HTTP DEBUG] <-- {} {}\nResponse: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), json);
+        println!(
+            "[HTTP DEBUG] <-- {} {}\nResponse: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            json
+        );
     }
     Ok((status, json))
 }
@@ -1373,29 +2006,55 @@ async fn http_get_json(url: &str) -> Result<(StatusCode, serde_json::Value), Str
         .await
         .map_err(|e| format!("HTTP GET failed: {}", e))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
-    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
     if debug_http_enabled() {
-        println!("[HTTP DEBUG] <-- {} {}\nResponse: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), json);
+        println!(
+            "[HTTP DEBUG] <-- {} {}\nResponse: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            json
+        );
     }
     Ok((status, json))
 }
 
-fn default_base_url() -> String { "http://127.0.0.1:3000".to_string() }
+fn default_base_url() -> String {
+    "http://127.0.0.1:8080".to_string()
+}
 
 #[tauri::command]
-async fn api_register(base_url: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
-    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
-    let cert = { state.cert_pem.lock().unwrap().clone() }.ok_or_else(|| "No certificate. Run gen-key <email> first.".to_string())?;
+async fn api_register(state: State<'_, AppState>) -> Result<String, String> {
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
+    };
+    // Load certificate from disk rather than memory
+    let cert_path = { state.config.lock().unwrap().certificate_path.clone() };
+    let cert = std::fs::read_to_string(&cert_path)
+        .map_err(|e| format!("No certificate on disk at {}: {}", cert_path, e))?;
     let url = format!("{}/api/register", base.trim_end_matches('/'));
     let body = serde_json::json!({"certificate": cert});
     let (status, json) = http_post_json(&url, body).await?;
     if status == StatusCode::CREATED {
-        let pkh = json.get("publicKeyHash").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !pkh.is_empty() { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
+        let pkh = json
+            .get("publicKeyHash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Ok(format!("REGISTERED PKH {}", pkh))
     } else if status == StatusCode::CONFLICT {
-        let pkh = { state.pkh_hex.lock().unwrap().clone().unwrap_or_default() };
+        let cfg = state.config.lock().unwrap().clone();
+        let pkh = read_pkh_from_config(&cfg).unwrap_or_default();
         Ok(format!("REGISTER CONFLICT PKH {}", pkh))
     } else {
         Ok(format!("REGISTER ERROR {} {}", status.as_u16(), json))
@@ -1403,30 +2062,117 @@ async fn api_register(base_url: Option<String>, state: State<'_, AppState>) -> R
 }
 
 #[tauri::command]
-async fn api_ready(base_url: Option<String>, socket_address: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
-    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
-    let pkh = { state.pkh_hex.lock().unwrap().clone() }.ok_or_else(|| "No PKH. Run gen-key and api-register first.".to_string())?;
-    let sock = if let Some(s) = socket_address { s } else {
-        let me = state.self_info.lock().unwrap().clone().ok_or_else(|| "No listener. Run start-listener first.".to_string())?;
-        format!("127.0.0.1:{}", me.port)
+async fn api_register_json(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
     };
+    // Load certificate from disk
+    let cert_path = { state.config.lock().unwrap().certificate_path.clone() };
+    let cert = std::fs::read_to_string(&cert_path)
+        .map_err(|e| format!("No certificate on disk at {}: {}", cert_path, e))?;
+    let url = format!("{}/api/register", base.trim_end_matches('/'));
+    let body = serde_json::json!({"certificate": cert});
+    let (status, json) = http_post_json(&url, body).await?;
+    Ok(serde_json::json!({
+        "status": status.as_u16(),
+        "data": json
+    }))
+}
+
+#[tauri::command]
+async fn api_ready(
+    localIP: Option<String>,
+    remoteIP: Option<String>,
+    broadcastPort: Option<u16>,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
+    };
+    let cfg_cur = state.config.lock().unwrap().clone();
+    let pkh = read_pkh_from_config(&cfg_cur)
+        .map_err(|_| "No PKH. Run gen-key and api-register first.".to_string())?;
+
+    // Ensure peer listener is started and configured
+    let need_start = { state.self_info.lock().unwrap().is_none() };
+    if need_start {
+        let bind_host = localIP.clone().filter(|s| !s.trim().is_empty());
+        let bind_port = broadcastPort;
+        let _ = start_peer_listener_async(state.clone(), app_handle.clone(), bind_host, bind_port).await?;
+    }
+    // After ensuring listener, read the actual port
+    let (actual_local_ip, actual_port) = {
+        let me = state
+            .self_info
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| "Failed to start listener".to_string())?;
+        (me.local_ip, me.port)
+    };
+
+    // Build the socket_address to announce
+    let remote_host_opt: Option<String> = if let Some(r) = remoteIP.clone() {
+        let r = r.trim();
+        if r.is_empty() { None } else if r.contains(':') {
+            parse_host_port(r).ok().map(|(h, _)| h)
+        } else { Some(r.to_string()) }
+    } else { None };
+    let host_for_broadcast = remote_host_opt
+        .or_else(|| localIP.clone())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let sock = format!("{}:{}", host_for_broadcast, actual_port);
+
     let url = format!("{}/api/broadcast/ready", base.trim_end_matches('/'));
     let body = serde_json::json!({"publicKeyHash": pkh, "socket_address": sock});
     let (status, json) = http_post_json(&url, body).await?;
     if status == StatusCode::OK || status == StatusCode::CREATED {
-        Ok(format!("READY OK {}", json.get("socket_address").and_then(|v| v.as_str()).unwrap_or("") ))
+        Ok(format!(
+            "READY OK {}",
+            json.get("socket_address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        ))
     } else {
         Ok(format!("READY ERROR {} {}", status.as_u16(), json))
     }
 }
 
 #[tauri::command]
-async fn api_lookup(base_url: Option<String>, public_key_hash: String, minutes: Option<u32>) -> Result<String, String> {
-    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
+async fn api_lookup(
+    public_key_hash: String,
+    minutes: Option<u32>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
+    };
     let mins = minutes.unwrap_or(10);
     let url = format!(
         "{}/api/broadcast/lookup?publicKeyHash={}&minutes={}",
-        base.trim_end_matches('/'), public_key_hash, mins
+        base.trim_end_matches('/'),
+        public_key_hash,
+        mins
     );
     let (status, json) = http_get_json(&url).await?;
     if status == StatusCode::OK {
@@ -1453,11 +2199,20 @@ fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
             let mut b64 = String::new();
             let mut in_body = false;
             for line in pem.lines() {
-                if line.starts_with("-----BEGIN") { in_body = true; continue; }
-                if line.starts_with("-----END") { break; }
-                if in_body { b64.push_str(line.trim()); }
+                if line.starts_with("-----BEGIN") {
+                    in_body = true;
+                    continue;
+                }
+                if line.starts_with("-----END") {
+                    break;
+                }
+                if in_body {
+                    b64.push_str(line.trim());
+                }
             }
-            if b64.is_empty() { return None; }
+            if b64.is_empty() {
+                return None;
+            }
             base64_simple_decode(&b64)
         }
     }
@@ -1501,7 +2256,9 @@ fn run_cli(app: tauri::App) {
             }
         }
         let input = line.trim();
-        if input.is_empty() { continue; }
+        if input.is_empty() {
+            continue;
+        }
         let mut parts = input.split_whitespace();
         let cmd = parts.next().unwrap_or("");
         match cmd {
@@ -1514,30 +2271,57 @@ fn run_cli(app: tauri::App) {
             }
             "gen-key" => {
                 // Syntax: gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]
-                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]"); continue; } };
+                let email = match parts.next() {
+                    Some(e) => e.to_string(),
+                    None => {
+                        println!("Usage: gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]");
+                        continue;
+                    }
+                };
                 // parse flags (optional)
                 let mut _password: Option<String> = None;
                 let mut _bits: Option<u32> = None;
                 let mut alg: String = "ecdsa".to_string();
                 let mut reuse = false;
                 for tok in parts {
-                    if let Some(v) = tok.strip_prefix("--password=") { _password = Some(v.to_string()); continue; }
-                    if let Some(v) = tok.strip_prefix("--bits=") { if let Ok(n) = v.parse::<u32>() { _bits = Some(n); } continue; }
-                    if let Some(v) = tok.strip_prefix("--alg=") { alg = v.to_lowercase(); continue; }
-                    if tok == "--reuse-key" { reuse = true; continue; }
+                    if let Some(v) = tok.strip_prefix("--password=") {
+                        _password = Some(v.to_string());
+                        continue;
+                    }
+                    if let Some(v) = tok.strip_prefix("--bits=") {
+                        if let Ok(n) = v.parse::<u32>() {
+                            _bits = Some(n);
+                        }
+                        continue;
+                    }
+                    if let Some(v) = tok.strip_prefix("--alg=") {
+                        alg = v.to_lowercase();
+                        continue;
+                    }
+                    if tok == "--reuse-key" {
+                        reuse = true;
+                        continue;
+                    }
                 }
                 // Determine output directory from config.certificate_path
                 let mut cfg = state.config.lock().unwrap().clone();
                 let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
-                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                let out_dir = cert_path_cur
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let _ = std::fs::create_dir_all(&out_dir);
                 let cert_path = out_dir.join("certificate.pem");
                 let priv_path = out_dir.join("private.key");
                 let hash_path = out_dir.join("publicKeyHash.txt");
 
-                // Helper: write legacy PKH file
+                // Helper: write legacy PKH file. TODO: remove
                 let write_legacy_pkh = |pkh: &str| {
-                    let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                    let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+                        std::path::PathBuf::from(dir)
+                    } else {
+                        logs_dir_from_app(None)
+                    };
                     let _ = std::fs::create_dir_all(&ld);
                     ld.push(format!("pkh-{}.txt", std::process::id()));
                     let _ = std::fs::write(&ld, pkh);
@@ -1553,22 +2337,41 @@ fn run_cli(app: tauri::App) {
                         } else {
                             // Build params and set alg if possible
                             let mut params = rcgen::CertificateParams::default();
-                            params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
-                            params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                            params
+                                .subject_alt_names
+                                .push(rcgen::SanType::Rfc822Name(email.clone()));
+                            params.distinguished_name.push(
+                                rcgen::DnType::CommonName,
+                                format!("Flashback Test {}", email),
+                            );
                             // alg selection best-effort
                             match alg.as_str() {
-                                "ed25519" => { params.alg = &rcgen::PKCS_ED25519; }
-                                "rsa" => { params.alg = &rcgen::PKCS_RSA_SHA256; }
-                                _ => { params.alg = &rcgen::PKCS_ECDSA_P256_SHA256; }
+                                "ed25519" => {
+                                    params.alg = &rcgen::PKCS_ED25519;
+                                }
+                                "rsa" => {
+                                    params.alg = &rcgen::PKCS_RSA_SHA256;
+                                }
+                                _ => {
+                                    params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
+                                }
                             }
                             // attach existing key
                             if let Ok(kp) = rcgen::KeyPair::from_pem(&priv_pem) {
                                 params.key_pair = Some(kp);
                                 match rcgen::Certificate::from_params(params) {
                                     Ok(cert) => {
-                                        if let Ok(pem) = cert.serialize_pem() { let _ = std::fs::write(&cert_path, &pem); pem_opt = Some(pem); }
+                                        if let Ok(pem) = cert.serialize_pem() {
+                                            let _ = std::fs::write(&cert_path, &pem);
+                                            pem_opt = Some(pem);
+                                        }
                                     }
-                                    Err(e) => { println!("Error generating certificate from existing key: {}", e); }
+                                    Err(e) => {
+                                        println!(
+                                            "Error generating certificate from existing key: {}",
+                                            e
+                                        );
+                                    }
                                 }
                             } else {
                                 println!("Invalid existing private.key; cannot reuse.");
@@ -1578,45 +2381,74 @@ fn run_cli(app: tauri::App) {
                         if let Some(pem) = pem_opt {
                             // compute PKH from PEM
                             let der = pem_to_der(&pem).unwrap_or_default();
-                            if der.is_empty() { println!("Failed to compute hash from certificate.pem"); continue; }
+                            if der.is_empty() {
+                                println!("Failed to compute hash from certificate.pem");
+                                continue;
+                            }
                             let mut hasher = Sha256::new();
                             hasher.update(&der);
                             let pkh = hex_crate::encode(hasher.finalize());
                             let _ = std::fs::write(&hash_path, &pkh);
                             write_legacy_pkh(&pkh);
-                            // update state and config
-                            {
-                                let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone());
-                            }
-                            {
-                                let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone());
-                            }
+                            // update config path only (no PKH in state)
                             cfg.certificate_path = cert_path.to_string_lossy().to_string();
-                            { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
+                            {
+                                let mut guard = state.config.lock().unwrap();
+                                *guard = cfg.clone();
+                            }
                             save_config_to_disk(&cfg);
                             println!("Reused existing private.key; ensured certificate.pem and publicKeyHash.txt");
                         }
                     } else {
-                        println!("No existing private.key found at {}", priv_path.to_string_lossy());
+                        println!(
+                            "No existing private.key found at {}",
+                            priv_path.to_string_lossy()
+                        );
                     }
                     continue;
                 }
 
                 // Fresh key generation
                 let mut params = rcgen::CertificateParams::default();
-                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
-                params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                params
+                    .subject_alt_names
+                    .push(rcgen::SanType::Rfc822Name(email.clone()));
+                params.distinguished_name.push(
+                    rcgen::DnType::CommonName,
+                    format!("Flashback Test {}", email),
+                );
                 match alg.as_str() {
-                    "ed25519" => { params.alg = &rcgen::PKCS_ED25519; }
-                    "rsa" => { params.alg = &rcgen::PKCS_RSA_SHA256; }
-                    _ => { params.alg = &rcgen::PKCS_ECDSA_P256_SHA256; }
+                    "ed25519" => {
+                        params.alg = &rcgen::PKCS_ED25519;
+                    }
+                    "rsa" => {
+                        params.alg = &rcgen::PKCS_RSA_SHA256;
+                    }
+                    _ => {
+                        params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
+                    }
                 }
                 let cert = match rcgen::Certificate::from_params(params) {
                     Ok(c) => c,
-                    Err(e) => { println!("Error generating certificate: {}", e); continue; }
+                    Err(e) => {
+                        println!("Error generating certificate: {}", e);
+                        continue;
+                    }
                 };
-                let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
-                let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
+                let pem = match cert.serialize_pem() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        println!("Error serializing PEM: {}", e);
+                        continue;
+                    }
+                };
+                let der = match cert.serialize_der() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        println!("Error serializing DER: {}", e);
+                        continue;
+                    }
+                };
                 let priv_pem = cert.serialize_private_key_pem();
                 let mut hasher = Sha256::new();
                 hasher.update(&der);
@@ -1625,17 +2457,28 @@ fn run_cli(app: tauri::App) {
                 let _ = std::fs::write(&priv_path, &priv_pem);
                 let _ = std::fs::write(&hash_path, &pkh);
                 write_legacy_pkh(&pkh);
-                // Save in state and config
-                { let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone()); }
-                { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
                 cfg.certificate_path = cert_path.to_string_lossy().to_string();
-                { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
+                {
+                    let mut guard = state.config.lock().unwrap();
+                    *guard = cfg.clone();
+                }
                 save_config_to_disk(&cfg);
-                println!("Generated key and certificate for {} (alg={}, bits={})", email, alg, _bits.unwrap_or(0));
+                println!(
+                    "Generated key and certificate for {} (alg={}, bits={})",
+                    email,
+                    alg,
+                    _bits.unwrap_or(0)
+                );
             }
             "gen-cert" => {
                 // Backward-compatible alias to gen-key
-                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-cert <email>"); continue; } };
+                let email = match parts.next() {
+                    Some(e) => e.to_string(),
+                    None => {
+                        println!("Usage: gen-cert <email>");
+                        continue;
+                    }
+                };
                 // Delegate to gen-key default behavior
                 let ah = app_handle.clone();
                 // Reconstruct command line for gen-key
@@ -1643,17 +2486,45 @@ fn run_cli(app: tauri::App) {
                 // call same logic as above by generating with defaults
                 // Implement inline to avoid refactor: duplicate minimal logic
                 let mut params = rcgen::CertificateParams::default();
-                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
-                params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                params
+                    .subject_alt_names
+                    .push(rcgen::SanType::Rfc822Name(email.clone()));
+                params.distinguished_name.push(
+                    rcgen::DnType::CommonName,
+                    format!("Flashback Test {}", email),
+                );
                 params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
-                let cert = match rcgen::Certificate::from_params(params) { Ok(c) => c, Err(e) => { println!("Error generating certificate: {}", e); continue; } };
-                let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
-                let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
+                let cert = match rcgen::Certificate::from_params(params) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        println!("Error generating certificate: {}", e);
+                        continue;
+                    }
+                };
+                let pem = match cert.serialize_pem() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        println!("Error serializing PEM: {}", e);
+                        continue;
+                    }
+                };
+                let der = match cert.serialize_der() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        println!("Error serializing DER: {}", e);
+                        continue;
+                    }
+                };
                 let priv_pem = cert.serialize_private_key_pem();
-                let mut hasher = Sha256::new(); hasher.update(&der); let pkh = hex_crate::encode(hasher.finalize());
+                let mut hasher = Sha256::new();
+                hasher.update(&der);
+                let pkh = hex_crate::encode(hasher.finalize());
                 let mut cfg = state.config.lock().unwrap().clone();
                 let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
-                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                let out_dir = cert_path_cur
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
                 let _ = std::fs::create_dir_all(&out_dir);
                 let cert_path = out_dir.join("certificate.pem");
                 let priv_path = out_dir.join("private.key");
@@ -1661,17 +2532,26 @@ fn run_cli(app: tauri::App) {
                 let _ = std::fs::write(&cert_path, &pem);
                 let _ = std::fs::write(&priv_path, &priv_pem);
                 let _ = std::fs::write(&hash_path, &pkh);
-                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
-                let _ = std::fs::create_dir_all(&ld); ld.push(format!("pkh-{}.txt", std::process::id())); let _ = std::fs::write(&ld, &pkh);
-                { let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone()); }
-                { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
-                cfg.certificate_path = cert_path.to_string_lossy().to_string(); { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
+                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+                    std::path::PathBuf::from(dir)
+                } else {
+                    logs_dir_from_app(None)
+                };
+                let _ = std::fs::create_dir_all(&ld);
+                ld.push(format!("pkh-{}.txt", std::process::id()));
+                let _ = std::fs::write(&ld, &pkh);
+                cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                {
+                    let mut guard = state.config.lock().unwrap();
+                    *guard = cfg.clone();
+                }
                 save_config_to_disk(&cfg);
                 println!("Generated certificate for {}", email);
             }
             "print-cert" => {
-                let cert_opt = { state.cert_pem.lock().unwrap().clone() };
-                if let Some(pem) = cert_opt {
+                // Read certificate from disk via config
+                let cert_path = { state.config.lock().unwrap().certificate_path.clone() };
+                if let Ok(pem) = std::fs::read_to_string(&cert_path) {
                     println!("-----BEGIN CERT START-----");
                     print!("{}", pem);
                     println!("-----END CERT START-----");
@@ -1680,21 +2560,32 @@ fn run_cli(app: tauri::App) {
                 }
             }
             "print-pkh" => {
-                let pkh_opt = { state.pkh_hex.lock().unwrap().clone() };
-                if let Some(pkh) = pkh_opt { println!("{}", pkh); } else { println!("No PKH. Run gen-key <email> first."); }
+                let cfg = state.config.lock().unwrap().clone();
+                match read_pkh_from_config(&cfg) {
+                    Ok(pkh) => println!("{}", pkh),
+                    Err(_) => println!("No PKH. Run gen-key <email> first."),
+                }
             }
             "start-listener" => {
                 let ah = app_handle.clone();
                 let st = state.clone();
-                match async_runtime::block_on(start_peer_listener_async(st, ah)) {
+                match async_runtime::block_on(start_peer_listener_async(st, ah, None, None)) {
                     Ok(port) => println!("Listener started on 0.0.0.0:{}", port),
                     Err(e) => println!("Error starting listener: {}", e),
                 }
             }
             "connect-server" => {
-                let server = match parts.next() { Some(s) => s.to_string(), None => { println!("Usage: connect-server <server:port>"); continue; } };
+                let server = match parts.next() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        println!("Usage: connect-server <server:port>");
+                        continue;
+                    }
+                };
                 if parts.next().is_some() {
-                    println!("Warning: extra arguments ignored. Usage: connect-server <server:port>");
+                    println!(
+                        "Warning: extra arguments ignored. Usage: connect-server <server:port>"
+                    );
                 }
                 let ah = app_handle.clone();
                 let st = state.clone();
@@ -1705,7 +2596,13 @@ fn run_cli(app: tauri::App) {
                 }
             }
             "connect-peer" => {
-                let addr = match parts.next() { Some(s) => s.to_string(), None => { println!("Usage: connect-peer <peer:port>"); continue; } };
+                let addr = match parts.next() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        println!("Usage: connect-peer <peer:port>");
+                        continue;
+                    }
+                };
                 if let Ok((ip, port)) = parse_host_port(&addr) {
                     let ah = app_handle.clone();
                     let st = state.clone();
@@ -1720,16 +2617,27 @@ fn run_cli(app: tauri::App) {
             }
             "send-channel" => {
                 // message may contain spaces; reconstruct from remaining parts
-                let channel = match parts.next() { Some(c) => c.to_string(), None => { println!("Usage: send-channel <channel> <message>"); continue; } };
+                let channel = match parts.next() {
+                    Some(c) => c.to_string(),
+                    None => {
+                        println!("Usage: send-channel <channel> <message>");
+                        continue;
+                    }
+                };
                 let message = parts.collect::<Vec<_>>().join(" ");
-                if message.is_empty() { println!("Usage: send-channel <channel> <message>"); continue; }
+                if message.is_empty() {
+                    println!("Usage: send-channel <channel> <message>");
+                    continue;
+                }
                 // try to pull client_ip/port from self_info
                 let (client_ip, client_port) = {
                     let guard = state.self_info.lock().unwrap();
                     if let Some(me) = &*guard {
                         (me.local_ip.clone(), me.port)
                     } else {
-                        println!("You must connect-server first to set your client_ip and client_port.");
+                        println!(
+                            "You must connect-server first to set your client_ip and client_port."
+                        );
                         continue;
                     }
                 };
@@ -1749,9 +2657,18 @@ fn run_cli(app: tauri::App) {
                 }
             }
             "send-client" => {
-                let addr = match parts.next() { Some(v) => v.to_string(), None => { println!("Usage: send-client <peer:port> <text>"); continue; } };
+                let addr = match parts.next() {
+                    Some(v) => v.to_string(),
+                    None => {
+                        println!("Usage: send-client <peer:port> <text>");
+                        continue;
+                    }
+                };
                 let text = parts.collect::<Vec<_>>().join(" ");
-                if text.is_empty() { println!("Usage: send-client <peer:port> <text>"); continue; }
+                if text.is_empty() {
+                    println!("Usage: send-client <peer:port> <text>");
+                    continue;
+                }
                 match parse_host_port(&addr) {
                     Ok((to_ip, to_port)) => {
                         let st = state.clone();
@@ -1765,15 +2682,28 @@ fn run_cli(app: tauri::App) {
                 }
             }
             "set-cert-path" => {
-                let path_arg = match parts.next() { Some(p) => p.to_string(), None => { println!("Usage: set-cert-path <path>"); continue; } };
-                if parts.next().is_some() { println!("Usage: set-cert-path <path>"); continue; }
+                let path_arg = match parts.next() {
+                    Some(p) => p.to_string(),
+                    None => {
+                        println!("Usage: set-cert-path <path>");
+                        continue;
+                    }
+                };
+                if parts.next().is_some() {
+                    println!("Usage: set-cert-path <path>");
+                    continue;
+                }
                 // If a directory is passed, append certificate.pem
                 let mut p = std::path::PathBuf::from(&path_arg);
-                let meta_is_dir = std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or_else(|_| path_arg.ends_with('/') || path_arg.ends_with('\\'));
+                let meta_is_dir = std::fs::metadata(&p)
+                    .map(|m| m.is_dir())
+                    .unwrap_or_else(|_| path_arg.ends_with('/') || path_arg.ends_with('\\'));
                 if meta_is_dir {
                     p = p.join("certificate.pem");
                 }
-                if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Some(parent) = p.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 let mut cfg = state.config.lock().unwrap().clone();
                 cfg.certificate_path = p.to_string_lossy().to_string();
                 {
@@ -1781,7 +2711,7 @@ fn run_cli(app: tauri::App) {
                     *guard = cfg.clone();
                 }
                 save_config_to_disk(&cfg);
-                println!("certificatePath set to {}", cfg.certificate_path);
+                println!("privateKeyPath set to {}", cfg.certificate_path);
                 continue;
             }
             "allow" => {
@@ -1805,7 +2735,13 @@ fn run_cli(app: tauri::App) {
                                 }
                                 RequestKind::FileOffer { name, .. } => {
                                     let st = state.clone();
-                                    let fut = peer_send_file_accept(p.ip, p.port, name, "accept".to_string(), st);
+                                    let fut = peer_send_file_accept(
+                                        p.ip,
+                                        p.port,
+                                        name,
+                                        "accept".to_string(),
+                                        st,
+                                    );
                                     let _ = async_runtime::block_on(fut);
                                 }
                             }
@@ -1830,7 +2766,8 @@ fn run_cli(app: tauri::App) {
                         }
                         RequestKind::FileOffer { name, .. } => {
                             let st = state.clone();
-                            let fut = peer_send_file_accept(p.ip, p.port, name, "accept".to_string(), st);
+                            let fut =
+                                peer_send_file_accept(p.ip, p.port, name, "accept".to_string(), st);
                             match async_runtime::block_on(fut) {
                                 Ok(_) => println!("File offer accepted."),
                                 Err(e) => println!("Failed to send file accept: {}", e),
@@ -1850,7 +2787,13 @@ fn run_cli(app: tauri::App) {
                         }
                         RequestKind::FileOffer { name, .. } => {
                             let st = state.clone();
-                            let fut = peer_send_file_accept(p.ip.clone(), p.port, name.clone(), "reject".to_string(), st);
+                            let fut = peer_send_file_accept(
+                                p.ip.clone(),
+                                p.port,
+                                name.clone(),
+                                "reject".to_string(),
+                                st,
+                            );
                             match async_runtime::block_on(fut) {
                                 Ok(_) => println!("File offer rejected."),
                                 Err(e) => println!("Failed to send file reject: {}", e),
@@ -1863,31 +2806,83 @@ fn run_cli(app: tauri::App) {
             }
             "api-register" => {
                 // optional baseUrl
-                let base = parts.next().map(|s| s.to_string());
+                // let base = parts.next().map(|s| s.to_string());
                 let st = state.clone();
-                let fut = api_register(base, st);
-                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
+                let fut = api_register(st);
+                match async_runtime::block_on(fut) {
+                    Ok(m) => println!("{}", m),
+                    Err(e) => println!("Error: {}", e),
+                }
             }
             "api-ready" => {
                 // usage: api-ready [baseUrl] [ip:port]
                 let first = parts.next().map(|s| s.to_string());
-                let (base, sock_opt) = if let Some(f) = first.clone() {
-                    if f.contains("://") { (first, parts.next().map(|s| s.to_string())) } else { (None, first) }
-                } else { (None, None) };
+                let (maybe_base, sock_opt) = if let Some(f) = first.clone() {
+                    if f.contains("://") {
+                        (first, parts.next().map(|s| s.to_string()))
+                    } else {
+                        (None, first)
+                    }
+                } else {
+                    (None, None)
+                };
+                // If baseUrl provided, persist into runtime config
+                if let Some(b) = maybe_base {
+                    if !b.trim().is_empty() {
+                        let mut cfg = state.config.lock().unwrap();
+                        cfg.base_url = b;
+                        save_config_to_disk(&cfg.clone());
+                    }
+                }
                 let st = state.clone();
-                let fut = api_ready(base, sock_opt, st);
-                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
+                // Map optional ip:port to localIP and broadcastPort; remoteIP unused in CLI
+                let (local_ip_opt, port_opt): (Option<String>, Option<u16>) = if let Some(sock) = sock_opt.clone() {
+                    if let Ok((h, p)) = parse_host_port(&sock) { (Some(h), Some(p)) } else { (None, None) }
+                } else { (None, None) };
+                let fut = api_ready(local_ip_opt, None, port_opt, st, app_handle.clone());
+                match async_runtime::block_on(fut) {
+                    Ok(m) => println!("{}", m),
+                    Err(e) => println!("Error: {}", e),
+                }
             }
             "api-lookup" => {
                 // usage: api-lookup [baseUrl] <pkh> [minutes]
                 let mut base: Option<String> = None;
                 let first = parts.next().map(|s| s.to_string());
                 let (pkh, minutes) = if let Some(f) = first.clone() {
-                    if f.contains("://") { base = first; (parts.next().map(|s| s.to_string()), parts.next().and_then(|m| m.parse::<u32>().ok())) } else { (first, parts.next().and_then(|m| m.parse::<u32>().ok())) }
-                } else { (None, None) };
-                let pkh = match pkh { Some(p) => p, None => { println!("Usage: api-lookup [baseUrl] <pkh> [minutes]"); continue; } };
-                let fut = api_lookup(base, pkh, minutes);
-                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
+                    if f.contains("://") {
+                        base = first;
+                        (
+                            parts.next().map(|s| s.to_string()),
+                            parts.next().and_then(|m| m.parse::<u32>().ok()),
+                        )
+                    } else {
+                        (first, parts.next().and_then(|m| m.parse::<u32>().ok()))
+                    }
+                } else {
+                    (None, None)
+                };
+                // Persist provided baseUrl into config if present
+                if let Some(b) = base.clone() {
+                    if !b.trim().is_empty() {
+                        let mut cfg = state.config.lock().unwrap();
+                        cfg.base_url = b;
+                        save_config_to_disk(&cfg.clone());
+                    }
+                }
+                let pkh = match pkh {
+                    Some(p) => p,
+                    None => {
+                        println!("Usage: api-lookup [baseUrl] <pkh> [minutes]");
+                        continue;
+                    }
+                };
+                let st = state.clone();
+                let fut = api_lookup(pkh, minutes, st);
+                match async_runtime::block_on(fut) {
+                    Ok(m) => println!("{}", m),
+                    Err(e) => println!("Error: {}", e),
+                }
             }
             other => {
                 println!("Unknown command: {}", other);
@@ -1946,7 +2941,6 @@ fn emit_enriched_client_list(
 
     let _ = app_handle.emit("client-list-updated", enriched);
 }
-
 
 #[tauri::command]
 async fn request_client_list(state: State<'_, AppState>) -> Result<String, String> {

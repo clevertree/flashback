@@ -25,15 +25,23 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const {spawn} = require('child_process');
 
 function parseArgs(argv) {
-    const args = { out: 'cypress/fixtures/keys.json', verify: false };
+    const args = {out: 'cypress/fixtures/keys.json', verify: false};
     for (let i = 2; i < argv.length; i++) {
         const a = argv[i];
-        if (a === '--out' && i + 1 < argv.length) { args.out = argv[++i]; continue; }
-        if (a === '--verify') { args.verify = true; continue; }
-        if (a === '--help' || a === '-h') { args.help = true; }
+        if (a === '--out' && i + 1 < argv.length) {
+            args.out = argv[++i];
+            continue;
+        }
+        if (a === '--verify') {
+            args.verify = true;
+            continue;
+        }
+        if (a === '--help' || a === '-h') {
+            args.help = true;
+        }
     }
     return args;
 }
@@ -48,7 +56,7 @@ function usage() {
 
 function ensureDirFor(filePath) {
     const dir = path.dirname(filePath);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, {recursive: true});
 }
 
 function writeJson(filePath, data) {
@@ -56,7 +64,9 @@ function writeJson(filePath, data) {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
 
 async function waitForFile(filePath, timeoutMs = 15000) {
     const start = Date.now();
@@ -64,7 +74,8 @@ async function waitForFile(filePath, timeoutMs = 15000) {
         try {
             const stat = fs.statSync(filePath);
             if (stat && stat.size >= 0) return true;
-        } catch { /* not yet */ }
+        } catch { /* not yet */
+        }
         await sleep(100);
     }
     throw new Error(`Timeout waiting for file: ${filePath}`);
@@ -95,17 +106,29 @@ async function buildClient(rootDir) {
 }
 
 function startClient(clientBin, logsDir, name) {
-    const env = { ...process.env, WDIO_LOGS_DIR: logsDir, CLIENT_DEBUG: '1' };
-    const child = spawn(clientBin, ['--cli'], { stdio: ['pipe', 'pipe', 'pipe'], env });
+    const env = {...process.env, WDIO_LOGS_DIR: logsDir, CLIENT_DEBUG: '1'};
+    const child = spawn(clientBin, ['--cli'], {stdio: ['pipe', 'pipe', 'pipe'], env});
     // Attach simple logging to files for debugging
     try {
         const logPath = path.join(logsDir, `keys-gen-${name}.log`);
-        const ws = fs.createWriteStream(logPath, { flags: 'a' });
-        const write = (data) => { try { ws.write(data); } catch {} };
+        const ws = fs.createWriteStream(logPath, {flags: 'a'});
+        const write = (data) => {
+            try {
+                ws.write(data);
+            } catch {
+            }
+        };
         child.stdout.on('data', write);
         child.stderr.on('data', write);
-        child.on('exit', (code, sig) => { try { ws.write(`\n[proc ${name}] exit code=${code} sig=${sig}\n`); ws.end(); } catch {} });
-    } catch {}
+        child.on('exit', (code, sig) => {
+            try {
+                ws.write(`\n[proc ${name}] exit code=${code} sig=${sig}\n`);
+                ws.end();
+            } catch {
+            }
+        });
+    } catch {
+    }
     return child;
 }
 
@@ -120,13 +143,13 @@ function ensureCleanDir(dirPath) {
         // does not exist; that's fine
     }
     // Ensure directory exists
-    fs.mkdirSync(dirPath, { recursive: true });
+    fs.mkdirSync(dirPath, {recursive: true});
 }
 
 async function genCertFor(child, email, outDir) {
     // Ensure the output directory exists and is a directory
     ensureCleanDir(outDir);
-    // Set the client's certificatePath to outDir/certificate.pem, then generate
+    // Set the client's privateKeyPath to outDir/certificate.pem, then generate
     child.stdin.write(`set-cert-path ${path.join(outDir, 'certificate.pem')}\n`);
     // Small delay to allow config write
     await sleep(50);
@@ -134,11 +157,17 @@ async function genCertFor(child, email, outDir) {
 }
 
 async function gracefulExit(child) {
-    try { child.stdin.write('exit\n'); } catch {}
+    try {
+        child.stdin.write('exit\n');
+    } catch {
+    }
     // give it a moment to exit
     await new Promise((res) => setTimeout(res, 200));
     if (!child.killed) {
-        try { child.kill(); } catch {}
+        try {
+            child.kill();
+        } catch {
+        }
     }
 }
 
@@ -158,12 +187,15 @@ function verifyFixture(filePath) {
 
 async function main() {
     const args = parseArgs(process.argv);
-    if (args.help) { usage(); return; }
+    if (args.help) {
+        usage();
+        return;
+    }
 
     // Resolve repo root (server/scripts -> ../../)
     const rootDir = path.resolve(__dirname, '..', '..');
     const logsDir = path.join(rootDir, 'wdio-logs', '.log');
-    fs.mkdirSync(logsDir, { recursive: true });
+    fs.mkdirSync(logsDir, {recursive: true});
 
     // Ensure client binary exists (build if necessary)
     let clientBin = findClientBinary(rootDir);
@@ -228,7 +260,7 @@ async function main() {
     const publicKeyHash2 = readTrim(pkhBPath).toLowerCase();
 
     const outPath = path.resolve(process.cwd(), args.out);
-    const data = { certPem, certPem2, publicKeyHash, publicKeyHash2, privateKey, privateKey2 };
+    const data = {certPem, certPem2, publicKeyHash, publicKeyHash2, privateKey, privateKey2};
     writeJson(outPath, data);
     console.log(`Fixture written: ${outPath}`);
 
