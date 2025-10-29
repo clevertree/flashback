@@ -2,15 +2,15 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# End-to-end CLI test for Flashback (Next.js server)
+# End-to-end CLI test for Flashback
+# RULE: In this E2E script, do not use curl (or any HTTP client) to perform operations
+#       that should be executed by the Flashback client binary or server process.
+#       Testing server–client API interactions is allowed, but must be initiated via
+#       the appropriate component (e.g., client CLI or running server), not by issuing
+#       HTTP requests directly from this script.
 # - Runs Cypress component tests first (server/npm)
-# - Ensures Next.js server is available on :8080 (spawns if missing)
-# - Registers two clients with the HTTP API using fixture certs
-# - Starts two clients in --cli mode (no server connection needed)
-# - Client A announces its peer socket via /api/broadcast/ready
-# - Client B looks up A via /api/broadcast/lookup, connects to A and sends DCC
+# - Starts two clients in --cli mode
 # - Verifies B<->A message exchange
-# - Stops both clients and spawned server (if any)
 # - Runs Cypress E2E tests at the end
 
 function Log($msg)
@@ -124,7 +124,7 @@ if (-not $serverUp)
     $startInfo.FileName = 'npm.cmd'
     $startInfo.WorkingDirectory = $serverDir
     $startInfo.ArgumentList.Add('run')
-    $startInfo.ArgumentList.Add('dev:8080')
+    $startInfo.ArgumentList.Add('dev')
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true

@@ -1,18 +1,17 @@
 import 'reflect-metadata';
 import {NextRequest, NextResponse} from 'next/server';
 import {initDatabase, UserModel} from '@/db/models';
-import {loadPublicCertificate} from "@/db/keyUtils";
+import {parseCertWithNodeCrypto} from "@db/keyUtils";
 
 export const runtime = 'nodejs';
 
-/**
- * POST /api/register
- * Registers a user public key pair.
- */
 export interface RegisterRequestBody {
     certificate: string;
 }
 
+/**
+ * Registers a user public key pair to be used for identifying users, media, and broadcast servers..
+ */
 export async function POST(req: NextRequest) {
     try {
         await initDatabase();
@@ -26,11 +25,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({error: 'Missing required fields: public_key_full'}, {status: 400});
         }
 
-        const {email, publicKeyHash} = loadPublicCertificate(certificate)
+        const {email, publicKeyHash} = parseCertWithNodeCrypto(certificate);
         if (!email)
-            return NextResponse.json({error: "Invalid email attribute"}, {status: 400})
+            return NextResponse.json({error: "Invalid email attribute"}, {status: 400});
         if (!publicKeyHash)
-            return NextResponse.json({error: "Invalid hash"}, {status: 400})
+            return NextResponse.json({error: "Invalid hash"}, {status: 400});
 
         const existing = await UserModel.findOne({
             where: {
@@ -57,11 +56,14 @@ export async function POST(req: NextRequest) {
                 publicKeyHash,
                 email,
             });
-            return NextResponse.json({id: created.id}, {status: 201});
+            return NextResponse.json({
+                id: created.id,
+                publicKeyHash
+            }, {status: 201});
         }
 
-        // Existing user with same email and key
-        return NextResponse.json({error: "Existing user with same email and key"}, {status: 409});
+        // Existing user with the same email and key
+        return NextResponse.json({error: "User exists with the same email and key"}, {status: 409});
     } catch (err: unknown) {
         if (err instanceof Error) {
             console.error('register error', err);

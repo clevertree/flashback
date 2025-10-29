@@ -8,7 +8,7 @@ pkill -f "next dev -p 8080" || true
 npm run keys:generate
 
 # Start Next.js dev server in background with test environment
-NODE_ENV=test PORT=8080 npm run dev:8080 &
+NODE_ENV=test PORT=3000 npm run dev &
 SERVER_PID=$!
 
 # Wait for server to start

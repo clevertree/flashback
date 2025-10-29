@@ -22,6 +22,8 @@
 - Cross-platform compatibility must be verified
 - Use E2E cli regression test on big changes
 - All API tests must use cy.request<TYPE> and use the API request and response interfaces
+- E2E CLI scripts must not issue raw HTTP requests (curl/Invoke-WebRequest) for operations that should be performed by the Flashback client binary or server. Test server–client API interactions via the appropriate component (e.g., client CLI or a running server), not by simulating them directly in the script.
+- Do not put any E2E test logic in app source code (client or server). Avoid identifiers like 'clientA'/'clientB' in source. All testing code must live strictly in test files or scripts. The only exception is adding generic debug/verbose toggles that are useful outside tests as well.
 
 ## Build Requirements
 

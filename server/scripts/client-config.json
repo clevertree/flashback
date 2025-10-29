@@ -1,0 +1,4 @@
+{
+  "temp_dir": ".tmp/",
+  "certificate_path": "/home/ari/dev/flashback/wdio-logs/.log/clientBCert.pem"
+}

@@ -9,6 +9,9 @@ interface BroadcastReadyRequestBody {
     socket_address: string;
 }
 
+/**
+ * Informs the server that a client is ready to receive broadcast requests.
+ */
 export async function POST(req: NextRequest) {
     try {
         await initDatabase();

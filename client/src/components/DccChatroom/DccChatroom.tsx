@@ -360,8 +360,7 @@ export default function DccChatroom({
             let tmpPath: string
             try {
                 const { tempDir, join } = await import('@tauri-apps/api/path')
-                const cfg = getConfig()
-                const baseTmp = (cfg.tempDir && cfg.tempDir.length > 0) ? cfg.tempDir : await tempDir()
+                const baseTmp = await tempDir()
                 tmpPath = await join(baseTmp, `${suggested}.part`)
             } catch {
                 // Fallback: same directory as final (may be restricted by Tauri scope)

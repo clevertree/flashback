@@ -3,8 +3,8 @@ import React, {useEffect, useMemo, useState} from 'react';
 
 // Client must use Rust plugins for all crypto; no Node/browser crypto implementations here.
 // Defaults
-const DEFAULT_SERVER = 'http://localhost:8080';
-const DEFAULT_LOCAL_PATH = '~/.relay-client/';
+const DEFAULT_SERVER = 'http://localhost:3000'; // TODO: move to config variable
+const DEFAULT_LOCAL_PATH = '~/.relay/';
 
 // Rust plugin interface (provided by Tauri, WRY, or custom bridge at runtime)
 declare global {

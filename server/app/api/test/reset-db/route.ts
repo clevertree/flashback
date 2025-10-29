@@ -1,5 +1,7 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {initDatabase, UserModel} from '@/db/models';
+import {Op} from "sequelize";
+
 
 export const runtime = 'nodejs';
 
@@ -22,7 +24,9 @@ export async function POST(req: NextRequest) {
         // Delete only test users (with email pattern test*@test.com)
         await UserModel.destroy({
             where: {
-                email: 'test%@test.com'
+                email: {
+                    [Op.like]: 'test%@test.com'
+                }
             }
         });
 

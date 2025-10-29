@@ -91,9 +91,9 @@ export class RepositoryModel extends Model {
     url!: string;
 }
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = process.env.PGSQL_DATABASE_URL || process.env.DATABASE_URL;
 if (!databaseUrl) {
-    throw new Error('DATABASE_URL environment variable is required');
+    throw new Error('PGSQL_DATABASE_URL environment variable is required');
 }
 
 // Database connection with sequelize-typescript

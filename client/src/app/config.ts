@@ -1,6 +1,7 @@
 export type NavSide = 'left' | 'right'
 
 export interface AppConfig {
+    serverUrl: string
   navSide: NavSide
   // Future settings placeholders
   autoPlayMedia: boolean
@@ -10,8 +11,8 @@ export interface AppConfig {
   autoReconnectPeers: boolean
   // Toggle showing historic (offline) clients in the client list
   showHistoricClients: boolean
-  // Optional temp directory for streaming downloads; defaults to OS temp when empty
-  tempDir?: string
+    // Determines the optional path for private key, certificate, and other secure files
+    certificatePath?: string
   // Peers the user approved for DCC (one-time approval)
   approvedPeers: Record<string, boolean> // key: "ip:port" -> approved once
   // Peers we have successfully connected a DCC with before
@@ -20,12 +21,13 @@ export interface AppConfig {
 
 // Runtime config with defaults; backward compatible with older stored keys.
 const defaultConfig: AppConfig = {
+    serverUrl: 'http://localhost:3000',
   navSide: 'left',
   autoPlayMedia: true,
   connectOnStartup: true,
   autoReconnectPeers: true,
   showHistoricClients: false,
-  tempDir: '',
+    certificatePath: '~/.relay/',
   approvedPeers: {},
   knownPeers: {},
 }

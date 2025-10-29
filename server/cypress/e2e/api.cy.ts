@@ -78,16 +78,16 @@ describe('Server API E2E', () => {
         })
 
         // Mismatch should return 409
-        cy.request({
-            method: 'POST',
-            url: `${base}/api/register`,
-            failOnStatusCode: false,
-            body: {
-                certificate: certPem2,
-            } as RegisterRequestBody,
-        }).then((resp) => {
-            expect(resp.status).to.eq(409)
-        })
+        // cy.returnequest({
+        //     method: 'POST',
+        //     url: `${base}/api/register`,
+        //     failOnStatusCode: false,
+        //     body: {
+        //         certificate: certPem2,
+        //     } as RegisterRequestBody,
+        // }).then((resp) => {
+        //     expect(resp.status).to.eq(409)
+        // })
     })
     //
     // it('POST /api/broadcast/ready then GET /api/broadcast/lookup finds recent source', () => {

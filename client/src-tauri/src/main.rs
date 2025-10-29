@@ -11,6 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
+use reqwest::StatusCode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ClientInfo {
@@ -94,6 +95,52 @@ struct PendingRequest {
     kind: RequestKind,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RuntimeConfig {
+    certificate_path: String,
+}
+
+fn default_app_data_dir_fallback() -> std::path::PathBuf {
+    // Platform-specific fallback if Tauri path resolver is not available yet.
+    #[cfg(target_os = "linux")]
+    {
+        use std::env;
+        if let Ok(xdg) = env::var("XDG_DATA_HOME") {
+            return std::path::PathBuf::from(xdg).join("RelayClient");
+        }
+        if let Ok(home) = env::var("HOME") {
+            return std::path::PathBuf::from(home).join(".local/share/RelayClient");
+        }
+        return std::env::temp_dir().join("RelayClient");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::env;
+        if let Ok(home) = env::var("HOME") {
+            return std::path::PathBuf::from(home).join("Library/Application Support/RelayClient");
+        }
+        return std::env::temp_dir().join("RelayClient");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::env;
+        if let Ok(appdata) = env::var("APPDATA") {
+            return std::path::PathBuf::from(appdata).join("RelayClient");
+        }
+        return std::env::temp_dir().join("RelayClient");
+    }
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        let base = default_app_data_dir_fallback();
+        let cert = base.join("certificate.pem");
+        Self {
+            certificate_path: cert.to_string_lossy().to_string(),
+        }
+    }
+}
+
 struct AppState {
     clients: Arc<Mutex<Vec<ClientInfo>>>,
     tx: Arc<Mutex<Option<mpsc::Sender<Message>>>>,
@@ -111,6 +158,8 @@ struct AppState {
     // Certificate and hash for registration
     cert_pem: Arc<Mutex<Option<String>>>,
     pkh_hex: Arc<Mutex<Option<String>>>,
+    // Runtime config persisted to disk
+    config: Arc<Mutex<RuntimeConfig>>,
 }
 
 #[tauri::command]
@@ -829,8 +878,48 @@ async fn send_chat_message(
     }
 }
 
+fn config_file_path() -> std::path::PathBuf {
+    // Persist config under app data dir: <appData>/RelayClient/client-config.json
+    let base = default_app_data_dir_fallback();
+    let _ = std::fs::create_dir_all(&base);
+    base.join("client-config.json")
+}
+
+fn load_config_from_disk() -> RuntimeConfig {
+    let p = config_file_path();
+    if let Ok(text) = std::fs::read_to_string(&p) {
+        if let Ok(cfg) = serde_json::from_str::<RuntimeConfig>(&text) {
+            return cfg;
+        }
+    }
+    RuntimeConfig::default()
+}
+
+fn save_config_to_disk(cfg: &RuntimeConfig) {
+    let p = config_file_path();
+    if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+    let _ = std::fs::write(p, serde_json::to_string_pretty(cfg).unwrap_or_default());
+}
+
+fn app_data_dir_from_handle(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBuf {
+    if let Some(ah) = app_handle {
+        if let Ok(p) = ah.path().app_data_dir() {
+            return p.join("RelayClient");
+        }
+    }
+    default_app_data_dir_fallback()
+}
+
+fn logs_dir_from_app(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    app_data_dir_from_handle(app_handle).join(".log")
+}
+
 fn main() {
     // Build shared AppState used by both GUI and CLI modes
+    let initial_cfg = load_config_from_disk();
     let app_state = AppState {
         clients: Arc::new(Mutex::new(Vec::new())),
         tx: Arc::new(Mutex::new(None)),
@@ -844,6 +933,7 @@ fn main() {
         pending_request: Arc::new(Mutex::new(None)),
         cert_pem: Arc::new(Mutex::new(None)),
         pkh_hex: Arc::new(Mutex::new(None)),
+        config: Arc::new(Mutex::new(initial_cfg)),
     };
 
     let args: Vec<String> = std::env::args().collect();
@@ -869,7 +959,10 @@ fn main() {
                 peer_send_file_accept,
                 peer_send_file_chunk,
                 peer_send_file_cancel,
-                peer_send_dcc_chat
+                peer_send_dcc_chat,
+                api_register,
+                api_ready,
+                api_lookup
             ])
             .build(tauri::generate_context!())
             .expect("failed to build tauri app for CLI mode");
@@ -896,6 +989,7 @@ fn main() {
                         Ok(cert) => {
                             let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); String::new() } };
                             let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); Vec::new() } };
+                            let priv_pem = cert.serialize_private_key_pem();
                             if !pem.is_empty() && !der.is_empty() {
                                 let mut hasher = Sha256::new();
                                 hasher.update(&der);
@@ -908,11 +1002,30 @@ fn main() {
                                     let mut h = st.pkh_hex.lock().unwrap();
                                     *h = Some(pkh.clone());
                                 }
-                                let pid = std::process::id();
-                                let cert_path = format!("cert-{}.pem", pid);
-                                let pkh_path = format!("pkh-{}.txt", pid);
+                                // Determine output directory from runtime config (same dir as certificate_path)
+                                let cfg_cur = st.config.lock().unwrap().clone();
+                                let cert_path_cur = std::path::PathBuf::from(cfg_cur.certificate_path.clone());
+                                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                                let _ = std::fs::create_dir_all(&out_dir);
+                                let cert_path = out_dir.join("certificate.pem");
+                                let priv_path = out_dir.join("private.key");
+                                let hash_path = out_dir.join("publicKeyHash.txt");
                                 let _ = std::fs::write(&cert_path, &pem);
-                                let _ = std::fs::write(&pkh_path, &pkh);
+                                let _ = std::fs::write(&priv_path, &priv_pem);
+                                let _ = std::fs::write(&hash_path, &pkh);
+                                // Also write legacy PKH file into logs dir for backward compatibility
+                                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                                let _ = std::fs::create_dir_all(&ld);
+                                ld.push(format!("pkh-{}.txt", std::process::id()));
+                                let _ = std::fs::write(&ld, &pkh);
+                                // Persist config (ensure certificate_path points to certificate.pem in this dir)
+                                let mut cfg_save = cfg_cur.clone();
+                                cfg_save.certificate_path = cert_path.to_string_lossy().to_string();
+                                {
+                                    let mut guard = st.config.lock().unwrap();
+                                    *guard = cfg_save.clone();
+                                }
+                                save_config_to_disk(&cfg_save);
                                 println!("Generated certificate for {}", email);
                             }
                         }
@@ -952,7 +1065,10 @@ fn main() {
             peer_send_file_accept,
             peer_send_file_chunk,
             peer_send_file_cancel,
-            peer_send_dcc_chat
+            peer_send_dcc_chat,
+            api_register,
+            api_ready,
+            api_lookup
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -978,10 +1094,14 @@ fn print_cli_help() {
     println!("  allow                Approve the pending incoming chat/transfer request");
     println!("  allow auto           Auto-approve all incoming chats/transfers for this session");
     println!("  deny                 Reject the pending incoming chat/transfer request");
-    println!("  gen-cert <email>     Generate a self-signed certificate with SAN rfc822Name=email");
+    println!("  gen-cert <email>      Generate a self-signed cert and private key; writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
+    println!("  set-cert-path <path> Set Config.certificatePath (file path). If a directory is provided, 'certificate.pem' will be appended");
     println!("  print-cert           Print the generated certificate PEM between markers");
     println!("  print-pkh            Print the SHA-256 hash of DER certificate as hex (lowercase)");
     println!("  start-listener       Start the peer listener on an ephemeral port (no server connection)");
+    println!("  api-register [baseUrl]   Register certificate with server; stores PKH and prints 'REGISTERED PKH <pkh>'");
+    println!("  api-ready [baseUrl] [ip:port]  Announce ready socket; if ip:port omitted, uses local listener; prints 'READY OK <ip:port>'");
+    println!("  api-lookup [baseUrl] <pkh> [minutes]  Lookup recent sockets; prints 'LOOKUP SOCKET <ip:port>' or 'LOOKUP NONE'");
     println!("  quit | exit          Exit the CLI");
 }
 
@@ -1013,10 +1133,16 @@ async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri
         let mut self_lock = state.self_info.lock().unwrap();
         *self_lock = Some(ClientInfo { local_ip: client_ip.clone(), remote_ip: "".to_string(), port: actual_port });
     }
-    // Also persist the port to a file for automation environments where stdout may be unavailable (Windows GUI subsystem)
+    // Persist the listener port to a file inside logs dir
     let pid = std::process::id();
-    let file_name = format!("peer-port-{}.txt", pid);
-    let _ = std::fs::write(&file_name, format!("{}", actual_port));
+    let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
+        std::path::PathBuf::from(dir)
+    } else {
+        logs_dir_from_app(Some(&app_handle))
+    };
+    let _ = std::fs::create_dir_all(&ld);
+    ld.push(format!("peer-port-{}.txt", pid));
+    let _ = std::fs::write(&ld, format!("{}", actual_port));
     // Spawn accept loop
     {
         let app_handle_clone = app_handle.clone();
@@ -1079,6 +1205,115 @@ async fn start_peer_listener_async(state: State<'_, AppState>, app_handle: tauri
     Ok(actual_port)
 }
 
+fn logs_dir_env() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { std::path::PathBuf::from(".") }
+}
+
+fn debug_http_enabled() -> bool {
+    matches!(std::env::var("CLIENT_DEBUG").ok().as_deref(), Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("on"))
+}
+
+async fn http_post_json(url: &str, body: serde_json::Value) -> Result<(StatusCode, serde_json::Value), String> {
+    if debug_http_enabled() {
+        println!("[HTTP DEBUG] POST {}\nRequest: {}", url, body);
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP POST failed: {}", e))?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
+    if debug_http_enabled() {
+        println!("[HTTP DEBUG] <-- {} {}\nResponse: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), json);
+    }
+    Ok((status, json))
+}
+
+async fn http_get_json(url: &str) -> Result<(StatusCode, serde_json::Value), String> {
+    if debug_http_enabled() {
+        println!("[HTTP DEBUG] GET {}", url);
+    }
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP GET failed: {}", e))?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({"raw": text}));
+    if debug_http_enabled() {
+        println!("[HTTP DEBUG] <-- {} {}\nResponse: {}", status.as_u16(), status.canonical_reason().unwrap_or(""), json);
+    }
+    Ok((status, json))
+}
+
+fn default_base_url() -> String { "http://127.0.0.1:3000".to_string() }
+
+#[tauri::command]
+async fn api_register(base_url: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
+    let cert = { state.cert_pem.lock().unwrap().clone() }.ok_or_else(|| "No certificate. Run gen-cert <email> first.".to_string())?;
+    let url = format!("{}/api/register", base.trim_end_matches('/'));
+    let body = serde_json::json!({"certificate": cert});
+    let (status, json) = http_post_json(&url, body).await?;
+    if status == StatusCode::CREATED {
+        let pkh = json.get("publicKeyHash").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if !pkh.is_empty() { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
+        Ok(format!("REGISTERED PKH {}", pkh))
+    } else if status == StatusCode::CONFLICT {
+        let pkh = { state.pkh_hex.lock().unwrap().clone().unwrap_or_default() };
+        Ok(format!("REGISTER CONFLICT PKH {}", pkh))
+    } else {
+        Ok(format!("REGISTER ERROR {} {}", status.as_u16(), json))
+    }
+}
+
+#[tauri::command]
+async fn api_ready(base_url: Option<String>, socket_address: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
+    let pkh = { state.pkh_hex.lock().unwrap().clone() }.ok_or_else(|| "No PKH. Run gen-cert and api-register first.".to_string())?;
+    let sock = if let Some(s) = socket_address { s } else {
+        let me = state.self_info.lock().unwrap().clone().ok_or_else(|| "No listener. Run start-listener first.".to_string())?;
+        format!("127.0.0.1:{}", me.port)
+    };
+    let url = format!("{}/api/broadcast/ready", base.trim_end_matches('/'));
+    let body = serde_json::json!({"publicKeyHash": pkh, "socket_address": sock});
+    let (status, json) = http_post_json(&url, body).await?;
+    if status == StatusCode::OK || status == StatusCode::CREATED {
+        Ok(format!("READY OK {}", json.get("socket_address").and_then(|v| v.as_str()).unwrap_or("") ))
+    } else {
+        Ok(format!("READY ERROR {} {}", status.as_u16(), json))
+    }
+}
+
+#[tauri::command]
+async fn api_lookup(base_url: Option<String>, public_key_hash: String, minutes: Option<u32>) -> Result<String, String> {
+    let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
+    let mins = minutes.unwrap_or(10);
+    let url = format!(
+        "{}/api/broadcast/lookup?publicKeyHash={}&minutes={}",
+        base.trim_end_matches('/'), public_key_hash, mins
+    );
+    let (status, json) = http_get_json(&url).await?;
+    if status == StatusCode::OK {
+        if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+            if let Some(first) = items.first() {
+                if let Some(sock) = first.get("socket_address").and_then(|v| v.as_str()) {
+                    return Ok(format!("LOOKUP SOCKET {}", sock));
+                }
+            }
+        }
+        Ok("LOOKUP NONE".to_string())
+    } else {
+        Ok(format!("LOOKUP ERROR {} {}", status.as_u16(), json))
+    }
+}
+
 fn run_cli(app: tauri::App) {
     use std::io::{self, Write};
     use tauri::async_runtime;
@@ -1122,6 +1357,10 @@ fn run_cli(app: tauri::App) {
             }
             "gen-cert" => {
                 let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-cert <email>"); continue; } };
+                if parts.next().is_some() {
+                    println!("Usage: gen-cert <email>");
+                    continue;
+                }
                 // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
                 let mut params = rcgen::CertificateParams::default();
                 // Add SAN email entry (RFC 822 name)
@@ -1136,6 +1375,7 @@ fn run_cli(app: tauri::App) {
                 };
                 let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
                 let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
+                let priv_pem = cert.serialize_private_key_pem();
                 // Compute SHA-256 hash over the DER certificate bytes (server does the same)
                 let mut hasher = Sha256::new();
                 hasher.update(&der);
@@ -1149,12 +1389,29 @@ fn run_cli(app: tauri::App) {
                     let mut h = state.pkh_hex.lock().unwrap();
                     *h = Some(pkh.clone());
                 }
-                // Also persist to files for automation
-                let pid = std::process::id();
-                let cert_path = format!("cert-{}.pem", pid);
-                let pkh_path = format!("pkh-{}.txt", pid);
+                // Determine output directory from the parent directory of config.certificate_path
+                let mut cfg = state.config.lock().unwrap().clone();
+                let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
+                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                let _ = std::fs::create_dir_all(&out_dir);
+                let cert_path = out_dir.join("certificate.pem");
+                let priv_path = out_dir.join("private.key");
+                let hash_path = out_dir.join("publicKeyHash.txt");
                 let _ = std::fs::write(&cert_path, &pem);
-                let _ = std::fs::write(&pkh_path, &pkh);
+                let _ = std::fs::write(&priv_path, &priv_pem);
+                let _ = std::fs::write(&hash_path, &pkh);
+                // Also write legacy PKH file into logs dir
+                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                let _ = std::fs::create_dir_all(&ld);
+                ld.push(format!("pkh-{}.txt", std::process::id()));
+                let _ = std::fs::write(&ld, &pkh);
+                // Update config.certificate_path to point to the new certificate.pem
+                cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                {
+                    let mut guard = state.config.lock().unwrap();
+                    *guard = cfg.clone();
+                }
+                save_config_to_disk(&cfg);
                 println!("Generated certificate for {}", email);
             }
             "print-cert" => {
@@ -1252,6 +1509,26 @@ fn run_cli(app: tauri::App) {
                     Err(_) => println!("Usage: send-client <peer:port> <text>"),
                 }
             }
+            "set-cert-path" => {
+                let path_arg = match parts.next() { Some(p) => p.to_string(), None => { println!("Usage: set-cert-path <path>"); continue; } };
+                if parts.next().is_some() { println!("Usage: set-cert-path <path>"); continue; }
+                // If a directory is passed, append certificate.pem
+                let mut p = std::path::PathBuf::from(&path_arg);
+                let meta_is_dir = std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or_else(|_| path_arg.ends_with('/') || path_arg.ends_with('\\'));
+                if meta_is_dir {
+                    p = p.join("certificate.pem");
+                }
+                if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+                let mut cfg = state.config.lock().unwrap().clone();
+                cfg.certificate_path = p.to_string_lossy().to_string();
+                {
+                    let mut guard = state.config.lock().unwrap();
+                    *guard = cfg.clone();
+                }
+                save_config_to_disk(&cfg);
+                println!("certificatePath set to {}", cfg.certificate_path);
+                continue;
+            }
             "allow" => {
                 // Check if user typed 'allow auto'
                 if let Some(next) = parts.next() {
@@ -1328,6 +1605,34 @@ fn run_cli(app: tauri::App) {
                 } else {
                     println!("No pending request to deny.");
                 }
+            }
+            "api-register" => {
+                // optional baseUrl
+                let base = parts.next().map(|s| s.to_string());
+                let st = state.clone();
+                let fut = api_register(base, st);
+                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
+            }
+            "api-ready" => {
+                // usage: api-ready [baseUrl] [ip:port]
+                let first = parts.next().map(|s| s.to_string());
+                let (base, sock_opt) = if let Some(f) = first.clone() {
+                    if f.contains("://") { (first, parts.next().map(|s| s.to_string())) } else { (None, first) }
+                } else { (None, None) };
+                let st = state.clone();
+                let fut = api_ready(base, sock_opt, st);
+                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
+            }
+            "api-lookup" => {
+                // usage: api-lookup [baseUrl] <pkh> [minutes]
+                let mut base: Option<String> = None;
+                let first = parts.next().map(|s| s.to_string());
+                let (pkh, minutes) = if let Some(f) = first.clone() {
+                    if f.contains("://") { base = first; (parts.next().map(|s| s.to_string()), parts.next().and_then(|m| m.parse::<u32>().ok())) } else { (first, parts.next().and_then(|m| m.parse::<u32>().ok())) }
+                } else { (None, None) };
+                let pkh = match pkh { Some(p) => p, None => { println!("Usage: api-lookup [baseUrl] <pkh> [minutes]"); continue; } };
+                let fut = api_lookup(base, pkh, minutes);
+                match async_runtime::block_on(fut) { Ok(m) => println!("{}", m), Err(e) => println!("Error: {}", e) }
             }
             other => {
                 println!("Unknown command: {}", other);

@@ -1,91 +1,36 @@
-import forge from 'node-forge';
+import {createHash, X509Certificate} from "crypto";
 
-// TODO: format as ssh
-export function loadPublicCertificate(
-    certPem: string
-) {
 
-    // Parse the PEM string into a certificate object
-    const certificate = forge.pki.certificateFromPem(certPem);
+export function parseCertWithNodeCrypto(certPem: string): { email?: string; publicKeyHash?: string } {
+    try {
+        const x509 = new X509Certificate(certPem);
+        // Compute SHA-256 over raw DER certificate bytes
+        const publicKeyHash = createHash('sha256').update(x509.raw).digest('hex');
 
-    // Try Subject emailAddress first
-    const emailSubject = certificate.subject.attributes.find(attr => attr.name === 'emailAddress')?.value as string | undefined;
-
-    // Then try SAN rfc822Name if subject email is missing
-    let emailSan: string | undefined;
-    const sanExt = (certificate.extensions || []).find((ext: any) => ext.name === 'subjectAltName');
-    if (sanExt && Array.isArray((sanExt as any).altNames)) {
-        const rfc822 = (sanExt as any).altNames.find((n: any) => n && (n.type === 1 || n.type === 'rfc822Name'));
-        if (rfc822 && typeof rfc822.value === 'string') {
-            emailSan = rfc822.value as string;
+        // Extract email from SAN (preferred) or Subject fallback
+        let email: string | undefined;
+        const san = x509.subjectAltName; // e.g., 'DNS:example.com, email:foo@bar.com'
+        if (san) {
+            // Look for entries like 'email:someone@example.com' (case-insensitive), also handle 'RFC822:email'
+            const parts = san.split(/\s*,\s*/);
+            for (const p of parts) {
+                const m = p.match(/^(?:email|rfc822Name)\s*:\s*(.+)$/i);
+                if (m) {
+                    email = m[1];
+                    break;
+                }
+            }
         }
-    }
-    const email = emailSubject || emailSan;
-
-    // Get the DER-encoded certificate
-    const derCertificate = forge.pki.certificateToAsn1(certificate);
-    const der = forge.asn1.toDer(derCertificate).getBytes();
-
-    // Create a SHA-256 hash of the DER-encoded certificate
-    const md = forge.md.sha256.create();
-    md.update(der);
-    const publicKeyHash = md.digest().toHex();
-
-    return {
-        publicKeyHash,
-        email,
-        certificate
-    };
-}
-
-export function generateUserKeysAndCert(
-    email: string,
-    password: string,
-    bits: number = 2048,
-    friendlyName: string = 'FlashBack'
-) {
-// Generate a key pair
-    const keys = forge.pki.rsa.generateKeyPair(bits);
-
-// Create a self-signed certificate
-    const certificate = forge.pki.createCertificate();
-    certificate.publicKey = keys.publicKey;
-    certificate.serialNumber = '01';
-    certificate.validity.notBefore = new Date();
-    certificate.validity.notAfter = new Date();
-    certificate.validity.notAfter.setFullYear(certificate.validity.notBefore.getFullYear() + 99); // Valid for 99 years
-
-// Set the subject attributes
-    certificate.setSubject([
-        {name: 'emailAddress', value: email},
-    ]);
-
-    certificate.setIssuer([
-        {name: 'emailAddress', value: email},
-    ])
-    // certificate.setIssuer(attrs);
-    certificate.sign(keys.privateKey, forge.md.sha256.create());
-
-// 2. Prepare the components for PKCS#12
-    const privateKey = keys.privateKey;
-
-// 3. Create the PKCS#12 structure
-    const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(
-        privateKey,
-        [certificate], // Array of certificates (can include intermediate CAs)
-        password, {
-            generateLocalKeyId: true,
-            friendlyName
+        if (!email) {
+            // Fallback to Subject string, which may contain 'emailAddress=...'
+            const subj = x509.subject; // e.g., 'CN=..., emailAddress=foo@bar.com'
+            const m = subj.match(/(?:^|,\s*)emailAddress=([^,]+)/i);
+            if (m) email = m[1];
         }
-    );
-
-    console.log('Certificate created successfully.', certificate);
-
-    return {
-        getPrivateKeyPemString: () => forge.pki.privateKeyToPem(keys.privateKey),
-        getCertPemString: () => forge.pki.certificateToPem(certificate),
-        // getPublicKeyString: () => forge.pki.publicKeyToPem(certificate.publicKey),
-        getCertString: () => forge.asn1.toDer(pkcs12Asn1).getBytes(),
-        // certificate
+        return {email, publicKeyHash};
+    } catch (e) {
+        // Re-throw with a cleaner message
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`Certificate parse error: ${msg}`);
     }
 }

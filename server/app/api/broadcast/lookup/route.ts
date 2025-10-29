@@ -4,6 +4,7 @@ import {Op} from 'sequelize';
 import {BroadcastSourceModel, initDatabase, UserModel} from '@/db/models';
 
 /**
+ * Provides a list of recent broadcasts sockets for a given user.
  * GET /api/broadcast/lookup?publicKeyHash=...&minutes=10
  */
 interface BroadcastLookupQuery {

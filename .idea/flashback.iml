@@ -8,6 +8,9 @@
       <sourceFolder url="file://$MODULE_DIR$/server/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/client/src-tauri/target" />
       <excludeFolder url="file://$MODULE_DIR$/server/target" />
+      <excludeFolder url="file://$MODULE_DIR$/client/out" />
+      <excludeFolder url="file://$MODULE_DIR$/infra/cdk/cdk.out" />
+      <excludeFolder url="file://$MODULE_DIR$/server/.vercel" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
