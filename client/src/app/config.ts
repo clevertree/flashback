@@ -21,7 +21,7 @@ export interface AppConfig {
 
 // Runtime config with defaults; backward compatible with older stored keys.
 const defaultConfig: AppConfig = {
-    serverUrl: 'http://localhost:3000',
+    serverUrl: 'http://localhost:8080',
   navSide: 'left',
   autoPlayMedia: true,
   connectOnStartup: true,

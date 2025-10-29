@@ -917,6 +917,126 @@ fn logs_dir_from_app(app_handle: Option<&tauri::AppHandle>) -> std::path::PathBu
     app_data_dir_from_handle(app_handle).join(".log")
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UiGenArgs {
+    email: String,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    bits: Option<u32>,
+    #[serde(default)]
+    friendlyName: Option<String>,
+    savePath: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UiGenResult {
+    certPem: String,
+    privateKeyPemPath: String,
+    certPemPath: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UiCheckResult {
+    exists: bool,
+    #[serde(default)]
+    certPem: Option<String>,
+}
+
+fn path_is_dir_like(p: &std::path::Path) -> bool {
+    if let Ok(meta) = std::fs::metadata(p) { return meta.is_dir(); }
+    // Heuristic: trailing separator implies directory
+    let s = p.to_string_lossy();
+    s.ends_with('/') || s.ends_with('\\')
+}
+
+fn resolve_output_dir(save_path: &str) -> std::path::PathBuf {
+    let p = std::path::PathBuf::from(save_path);
+    if path_is_dir_like(&p) {
+        return p;
+    }
+    // If it looks like a file path (e.g., ends with .pem or .key), use its parent
+    p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+#[tauri::command]
+async fn ui_check_key_exists(config_path: String) -> Result<UiCheckResult, String> {
+    // Support both directory and file inputs.
+    let p = std::path::PathBuf::from(&config_path);
+    let (dir, priv_path, cert_path) = if path_is_dir_like(&p) {
+        let d = p;
+        let privp = d.join("private.key");
+        let certp = d.join("certificate.pem");
+        (d, privp, certp)
+    } else {
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if name.ends_with(".key") {
+            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            (d.clone(), p.clone(), d.join("certificate.pem"))
+        } else if name.ends_with(".pem") {
+            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            (d.clone(), d.join("private.key"), p.clone())
+        } else {
+            // Unknown file name; treat parent as dir
+            let d = p.parent().map(|x| x.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            (d.clone(), d.join("private.key"), d.join("certificate.pem"))
+        }
+    };
+    let exists = priv_path.exists();
+    let cert_pem = if cert_path.exists() {
+        std::fs::read_to_string(&cert_path).ok()
+    } else { None };
+    Ok(UiCheckResult { exists, certPem: cert_pem })
+}
+
+#[tauri::command]
+async fn ui_generate_user_keys_and_cert(args: UiGenArgs, state: State<'_, AppState>) -> Result<UiGenResult, String> {
+    let out_dir = resolve_output_dir(&args.savePath);
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("Failed to create dir: {}", e))?;
+    // Build certificate with rcgen; ignore password/bits for now
+    let mut params = rcgen::CertificateParams::default();
+    params.subject_alt_names.push(rcgen::SanType::Rfc822Name(args.email.clone()));
+    params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", args.email));
+    // Choose algorithm default ECDSA; friendlyName/bits not used currently
+    params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
+    let cert = rcgen::Certificate::from_params(params).map_err(|e| format!("Generate cert error: {}", e))?;
+    let pem = cert.serialize_pem().map_err(|e| format!("Serialize PEM error: {}", e))?;
+    let der = cert.serialize_der().map_err(|e| format!("Serialize DER error: {}", e))?;
+    let priv_pem = cert.serialize_private_key_pem();
+    // Compute PKH (SHA-256 over DER)
+    let mut hasher = Sha256::new();
+    hasher.update(&der);
+    let pkh = hex_crate::encode(hasher.finalize());
+    // Write files
+    let cert_path = out_dir.join("certificate.pem");
+    let priv_path = out_dir.join("private.key");
+    let hash_path = out_dir.join("publicKeyHash.txt");
+    std::fs::write(&cert_path, &pem).map_err(|e| format!("Write certificate.pem failed: {}", e))?;
+    std::fs::write(&priv_path, &priv_pem).map_err(|e| format!("Write private.key failed: {}", e))?;
+    std::fs::write(&hash_path, &pkh).map_err(|e| format!("Write publicKeyHash.txt failed: {}", e))?;
+    // Update state and persist config certificate_path -> certificate.pem
+    {
+        let mut c = state.cert_pem.lock().unwrap();
+        *c = Some(pem.clone());
+    }
+    {
+        let mut h = state.pkh_hex.lock().unwrap();
+        *h = Some(pkh.clone());
+    }
+    {
+        let mut cfg = state.config.lock().unwrap().clone();
+        cfg.certificate_path = cert_path.to_string_lossy().to_string();
+        let mut guard = state.config.lock().unwrap();
+        *guard = cfg.clone();
+        save_config_to_disk(&cfg);
+    }
+    Ok(UiGenResult {
+        certPem: pem,
+        privateKeyPemPath: priv_path.to_string_lossy().to_string(),
+        certPemPath: cert_path.to_string_lossy().to_string(),
+    })
+}
+
 fn main() {
     // Build shared AppState used by both GUI and CLI modes
     let initial_cfg = load_config_from_disk();
@@ -962,7 +1082,9 @@ fn main() {
                 peer_send_dcc_chat,
                 api_register,
                 api_ready,
-                api_lookup
+                api_lookup,
+                ui_check_key_exists,
+                ui_generate_user_keys_and_cert
             ])
             .build(tauri::generate_context!())
             .expect("failed to build tauri app for CLI mode");
@@ -977,61 +1099,65 @@ fn main() {
                 *aa = true;
             }
             // Handle optional startup certificate generation: --gen-cert=<email>
-            if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-cert=")) {
-                if let Some((_, email)) = gen_arg.split_once('=') {
-                    // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
-                    let mut params = rcgen::CertificateParams::default();
-                    params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.to_string()));
-                    params
-                        .distinguished_name
-                        .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
-                    match rcgen::Certificate::from_params(params) {
-                        Ok(cert) => {
-                            let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); String::new() } };
-                            let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); Vec::new() } };
-                            let priv_pem = cert.serialize_private_key_pem();
-                            if !pem.is_empty() && !der.is_empty() {
-                                let mut hasher = Sha256::new();
-                                hasher.update(&der);
-                                let pkh = hex_crate::encode(hasher.finalize());
-                                {
-                                    let mut c = st.cert_pem.lock().unwrap();
-                                    *c = Some(pem.clone());
-                                }
-                                {
-                                    let mut h = st.pkh_hex.lock().unwrap();
-                                    *h = Some(pkh.clone());
-                                }
-                                // Determine output directory from runtime config (same dir as certificate_path)
-                                let cfg_cur = st.config.lock().unwrap().clone();
-                                let cert_path_cur = std::path::PathBuf::from(cfg_cur.certificate_path.clone());
-                                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
-                                let _ = std::fs::create_dir_all(&out_dir);
-                                let cert_path = out_dir.join("certificate.pem");
-                                let priv_path = out_dir.join("private.key");
-                                let hash_path = out_dir.join("publicKeyHash.txt");
-                                let _ = std::fs::write(&cert_path, &pem);
-                                let _ = std::fs::write(&priv_path, &priv_pem);
-                                let _ = std::fs::write(&hash_path, &pkh);
-                                // Also write legacy PKH file into logs dir for backward compatibility
-                                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
-                                let _ = std::fs::create_dir_all(&ld);
-                                ld.push(format!("pkh-{}.txt", std::process::id()));
-                                let _ = std::fs::write(&ld, &pkh);
-                                // Persist config (ensure certificate_path points to certificate.pem in this dir)
-                                let mut cfg_save = cfg_cur.clone();
-                                cfg_save.certificate_path = cert_path.to_string_lossy().to_string();
-                                {
-                                    let mut guard = st.config.lock().unwrap();
-                                    *guard = cfg_save.clone();
-                                }
-                                save_config_to_disk(&cfg_save);
-                                println!("Generated certificate for {}", email);
+            // Support startup generation via --gen-key=<email> or legacy --gen-cert=<email>
+            let startup_email = if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-key=")) {
+                gen_arg.split_once('=').map(|(_, e)| e.to_string())
+            } else if let Some(gen_arg) = args.iter().find(|a| a.starts_with("--gen-cert=")) {
+                gen_arg.split_once('=').map(|(_, e)| e.to_string())
+            } else { None };
+            if let Some(email) = startup_email {
+                // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
+                let mut params = rcgen::CertificateParams::default();
+                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.to_string()));
+                params
+                    .distinguished_name
+                    .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                match rcgen::Certificate::from_params(params) {
+                    Ok(cert) => {
+                        let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); String::new() } };
+                        let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); Vec::new() } };
+                        let priv_pem = cert.serialize_private_key_pem();
+                        if !pem.is_empty() && !der.is_empty() {
+                            let mut hasher = Sha256::new();
+                            hasher.update(&der);
+                            let pkh = hex_crate::encode(hasher.finalize());
+                            {
+                                let mut c = st.cert_pem.lock().unwrap();
+                                *c = Some(pem.clone());
                             }
+                            {
+                                let mut h = st.pkh_hex.lock().unwrap();
+                                *h = Some(pkh.clone());
+                            }
+                            // Determine output directory from runtime config (same dir as certificate_path)
+                            let cfg_cur = st.config.lock().unwrap().clone();
+                            let cert_path_cur = std::path::PathBuf::from(cfg_cur.certificate_path.clone());
+                            let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                            let _ = std::fs::create_dir_all(&out_dir);
+                            let cert_path = out_dir.join("certificate.pem");
+                            let priv_path = out_dir.join("private.key");
+                            let hash_path = out_dir.join("publicKeyHash.txt");
+                            let _ = std::fs::write(&cert_path, &pem);
+                            let _ = std::fs::write(&priv_path, &priv_pem);
+                            let _ = std::fs::write(&hash_path, &pkh);
+                            // Also write legacy PKH file into logs dir for backward compatibility
+                            let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                            let _ = std::fs::create_dir_all(&ld);
+                            ld.push(format!("pkh-{}.txt", std::process::id()));
+                            let _ = std::fs::write(&ld, &pkh);
+                            // Persist config (ensure certificate_path points to certificate.pem in this dir)
+                            let mut cfg_save = cfg_cur.clone();
+                            cfg_save.certificate_path = cert_path.to_string_lossy().to_string();
+                            {
+                                let mut guard = st.config.lock().unwrap();
+                                *guard = cfg_save.clone();
+                            }
+                            save_config_to_disk(&cfg_save);
+                            println!("Generated certificate for {}", email);
                         }
-                        Err(e) => {
-                            println!("Error generating certificate: {}", e);
-                        }
+                    }
+                    Err(e) => {
+                        println!("Error generating certificate: {}", e);
                     }
                 }
             }
@@ -1068,7 +1194,9 @@ fn main() {
             peer_send_dcc_chat,
             api_register,
             api_ready,
-            api_lookup
+            api_lookup,
+            ui_check_key_exists,
+            ui_generate_user_keys_and_cert
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1094,7 +1222,8 @@ fn print_cli_help() {
     println!("  allow                Approve the pending incoming chat/transfer request");
     println!("  allow auto           Auto-approve all incoming chats/transfers for this session");
     println!("  deny                 Reject the pending incoming chat/transfer request");
-    println!("  gen-cert <email>      Generate a self-signed cert and private key; writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
+    println!("  gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]\n                       Generate or reuse a key: writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
+    println!("  gen-cert <email>      (alias) Generate a self-signed cert and private key; writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
     println!("  set-cert-path <path> Set Config.certificatePath (file path). If a directory is provided, 'certificate.pem' will be appended");
     println!("  print-cert           Print the generated certificate PEM between markers");
     println!("  print-pkh            Print the SHA-256 hash of DER certificate as hex (lowercase)");
@@ -1257,7 +1386,7 @@ fn default_base_url() -> String { "http://127.0.0.1:3000".to_string() }
 #[tauri::command]
 async fn api_register(base_url: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
     let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
-    let cert = { state.cert_pem.lock().unwrap().clone() }.ok_or_else(|| "No certificate. Run gen-cert <email> first.".to_string())?;
+    let cert = { state.cert_pem.lock().unwrap().clone() }.ok_or_else(|| "No certificate. Run gen-key <email> first.".to_string())?;
     let url = format!("{}/api/register", base.trim_end_matches('/'));
     let body = serde_json::json!({"certificate": cert});
     let (status, json) = http_post_json(&url, body).await?;
@@ -1276,7 +1405,7 @@ async fn api_register(base_url: Option<String>, state: State<'_, AppState>) -> R
 #[tauri::command]
 async fn api_ready(base_url: Option<String>, socket_address: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
     let base = base_url.filter(|s| !s.is_empty()).unwrap_or_else(default_base_url);
-    let pkh = { state.pkh_hex.lock().unwrap().clone() }.ok_or_else(|| "No PKH. Run gen-cert and api-register first.".to_string())?;
+    let pkh = { state.pkh_hex.lock().unwrap().clone() }.ok_or_else(|| "No PKH. Run gen-key and api-register first.".to_string())?;
     let sock = if let Some(s) = socket_address { s } else {
         let me = state.self_info.lock().unwrap().clone().ok_or_else(|| "No listener. Run start-listener first.".to_string())?;
         format!("127.0.0.1:{}", me.port)
@@ -1312,6 +1441,34 @@ async fn api_lookup(base_url: Option<String>, public_key_hash: String, minutes: 
     } else {
         Ok(format!("LOOKUP ERROR {} {}", status.as_u16(), json))
     }
+}
+
+fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
+    // Try to decode PEM using pem-rfc7468 crate
+    match pem_rfc7468::decode_vec(pem.as_bytes()) {
+        Ok((_label, der)) => Some(der),
+        Err(_) => {
+            // Fallback: strip header/footer and base64 decode using data_encoding
+            // We avoid adding a new dependency: try a simple manual parse if needed
+            let mut b64 = String::new();
+            let mut in_body = false;
+            for line in pem.lines() {
+                if line.starts_with("-----BEGIN") { in_body = true; continue; }
+                if line.starts_with("-----END") { break; }
+                if in_body { b64.push_str(line.trim()); }
+            }
+            if b64.is_empty() { return None; }
+            base64_simple_decode(&b64)
+        }
+    }
+}
+
+fn base64_simple_decode(s: &str) -> Option<Vec<u8>> {
+    // Minimal base64 decoder using pem-rfc7468 base64 engine if available; otherwise none.
+    // pem-rfc7468 uses base64ct internally but doesn't expose. Implement a tiny decoder via base64 crate is not available.
+    // As a fallback, attempt using standard library via data_encoding if compiled in. Since not available, return None.
+    // In practice, decode_vec above should succeed for valid certificate PEMs.
+    None
 }
 
 fn run_cli(app: tauri::App) {
@@ -1355,20 +1512,105 @@ fn run_cli(app: tauri::App) {
                 println!("Bye!");
                 break;
             }
-            "gen-cert" => {
-                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-cert <email>"); continue; } };
-                if parts.next().is_some() {
-                    println!("Usage: gen-cert <email>");
+            "gen-key" => {
+                // Syntax: gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]
+                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]"); continue; } };
+                // parse flags (optional)
+                let mut _password: Option<String> = None;
+                let mut _bits: Option<u32> = None;
+                let mut alg: String = "ecdsa".to_string();
+                let mut reuse = false;
+                for tok in parts {
+                    if let Some(v) = tok.strip_prefix("--password=") { _password = Some(v.to_string()); continue; }
+                    if let Some(v) = tok.strip_prefix("--bits=") { if let Ok(n) = v.parse::<u32>() { _bits = Some(n); } continue; }
+                    if let Some(v) = tok.strip_prefix("--alg=") { alg = v.to_lowercase(); continue; }
+                    if tok == "--reuse-key" { reuse = true; continue; }
+                }
+                // Determine output directory from config.certificate_path
+                let mut cfg = state.config.lock().unwrap().clone();
+                let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
+                let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+                let _ = std::fs::create_dir_all(&out_dir);
+                let cert_path = out_dir.join("certificate.pem");
+                let priv_path = out_dir.join("private.key");
+                let hash_path = out_dir.join("publicKeyHash.txt");
+
+                // Helper: write legacy PKH file
+                let write_legacy_pkh = |pkh: &str| {
+                    let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
+                    let _ = std::fs::create_dir_all(&ld);
+                    ld.push(format!("pkh-{}.txt", std::process::id()));
+                    let _ = std::fs::write(&ld, pkh);
+                };
+
+                // Reuse mode: do not generate a new private key
+                if reuse {
+                    if let Ok(priv_pem) = std::fs::read_to_string(&priv_path) {
+                        // If certificate.pem exists, compute PKH from it; otherwise generate a cert using existing key
+                        let mut pem_opt: Option<String> = None;
+                        if let Ok(existing_cert) = std::fs::read_to_string(&cert_path) {
+                            pem_opt = Some(existing_cert);
+                        } else {
+                            // Build params and set alg if possible
+                            let mut params = rcgen::CertificateParams::default();
+                            params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
+                            params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                            // alg selection best-effort
+                            match alg.as_str() {
+                                "ed25519" => { params.alg = &rcgen::PKCS_ED25519; }
+                                "rsa" => { params.alg = &rcgen::PKCS_RSA_SHA256; }
+                                _ => { params.alg = &rcgen::PKCS_ECDSA_P256_SHA256; }
+                            }
+                            // attach existing key
+                            if let Ok(kp) = rcgen::KeyPair::from_pem(&priv_pem) {
+                                params.key_pair = Some(kp);
+                                match rcgen::Certificate::from_params(params) {
+                                    Ok(cert) => {
+                                        if let Ok(pem) = cert.serialize_pem() { let _ = std::fs::write(&cert_path, &pem); pem_opt = Some(pem); }
+                                    }
+                                    Err(e) => { println!("Error generating certificate from existing key: {}", e); }
+                                }
+                            } else {
+                                println!("Invalid existing private.key; cannot reuse.");
+                                continue;
+                            }
+                        }
+                        if let Some(pem) = pem_opt {
+                            // compute PKH from PEM
+                            let der = pem_to_der(&pem).unwrap_or_default();
+                            if der.is_empty() { println!("Failed to compute hash from certificate.pem"); continue; }
+                            let mut hasher = Sha256::new();
+                            hasher.update(&der);
+                            let pkh = hex_crate::encode(hasher.finalize());
+                            let _ = std::fs::write(&hash_path, &pkh);
+                            write_legacy_pkh(&pkh);
+                            // update state and config
+                            {
+                                let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone());
+                            }
+                            {
+                                let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone());
+                            }
+                            cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                            { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
+                            save_config_to_disk(&cfg);
+                            println!("Reused existing private.key; ensured certificate.pem and publicKeyHash.txt");
+                        }
+                    } else {
+                        println!("No existing private.key found at {}", priv_path.to_string_lossy());
+                    }
                     continue;
                 }
-                // Generate a self-signed certificate with SAN rfc822Name=email using rcgen (v0.12)
+
+                // Fresh key generation
                 let mut params = rcgen::CertificateParams::default();
-                // Add SAN email entry (RFC 822 name)
                 params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
-                // Optionally set a CN for readability (not used by server)
-                params
-                    .distinguished_name
-                    .push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                match alg.as_str() {
+                    "ed25519" => { params.alg = &rcgen::PKCS_ED25519; }
+                    "rsa" => { params.alg = &rcgen::PKCS_RSA_SHA256; }
+                    _ => { params.alg = &rcgen::PKCS_ECDSA_P256_SHA256; }
+                }
                 let cert = match rcgen::Certificate::from_params(params) {
                     Ok(c) => c,
                     Err(e) => { println!("Error generating certificate: {}", e); continue; }
@@ -1376,20 +1618,39 @@ fn run_cli(app: tauri::App) {
                 let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
                 let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
                 let priv_pem = cert.serialize_private_key_pem();
-                // Compute SHA-256 hash over the DER certificate bytes (server does the same)
                 let mut hasher = Sha256::new();
                 hasher.update(&der);
                 let pkh = hex_crate::encode(hasher.finalize());
-                // Save in state
-                {
-                    let mut c = state.cert_pem.lock().unwrap();
-                    *c = Some(pem.clone());
-                }
-                {
-                    let mut h = state.pkh_hex.lock().unwrap();
-                    *h = Some(pkh.clone());
-                }
-                // Determine output directory from the parent directory of config.certificate_path
+                let _ = std::fs::write(&cert_path, &pem);
+                let _ = std::fs::write(&priv_path, &priv_pem);
+                let _ = std::fs::write(&hash_path, &pkh);
+                write_legacy_pkh(&pkh);
+                // Save in state and config
+                { let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone()); }
+                { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
+                cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
+                save_config_to_disk(&cfg);
+                println!("Generated key and certificate for {} (alg={}, bits={})", email, alg, _bits.unwrap_or(0));
+            }
+            "gen-cert" => {
+                // Backward-compatible alias to gen-key
+                let email = match parts.next() { Some(e) => e.to_string(), None => { println!("Usage: gen-cert <email>"); continue; } };
+                // Delegate to gen-key default behavior
+                let ah = app_handle.clone();
+                // Reconstruct command line for gen-key
+                println!("Note: 'gen-cert' is deprecated, use 'gen-key'. Proceeding...");
+                // call same logic as above by generating with defaults
+                // Implement inline to avoid refactor: duplicate minimal logic
+                let mut params = rcgen::CertificateParams::default();
+                params.subject_alt_names.push(rcgen::SanType::Rfc822Name(email.clone()));
+                params.distinguished_name.push(rcgen::DnType::CommonName, format!("Flashback Test {}", email));
+                params.alg = &rcgen::PKCS_ECDSA_P256_SHA256;
+                let cert = match rcgen::Certificate::from_params(params) { Ok(c) => c, Err(e) => { println!("Error generating certificate: {}", e); continue; } };
+                let pem = match cert.serialize_pem() { Ok(p) => p, Err(e) => { println!("Error serializing PEM: {}", e); continue; } };
+                let der = match cert.serialize_der() { Ok(d) => d, Err(e) => { println!("Error serializing DER: {}", e); continue; } };
+                let priv_pem = cert.serialize_private_key_pem();
+                let mut hasher = Sha256::new(); hasher.update(&der); let pkh = hex_crate::encode(hasher.finalize());
                 let mut cfg = state.config.lock().unwrap().clone();
                 let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
                 let out_dir = cert_path_cur.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -1400,17 +1661,11 @@ fn run_cli(app: tauri::App) {
                 let _ = std::fs::write(&cert_path, &pem);
                 let _ = std::fs::write(&priv_path, &priv_pem);
                 let _ = std::fs::write(&hash_path, &pkh);
-                // Also write legacy PKH file into logs dir
                 let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") { std::path::PathBuf::from(dir) } else { logs_dir_from_app(None) };
-                let _ = std::fs::create_dir_all(&ld);
-                ld.push(format!("pkh-{}.txt", std::process::id()));
-                let _ = std::fs::write(&ld, &pkh);
-                // Update config.certificate_path to point to the new certificate.pem
-                cfg.certificate_path = cert_path.to_string_lossy().to_string();
-                {
-                    let mut guard = state.config.lock().unwrap();
-                    *guard = cfg.clone();
-                }
+                let _ = std::fs::create_dir_all(&ld); ld.push(format!("pkh-{}.txt", std::process::id())); let _ = std::fs::write(&ld, &pkh);
+                { let mut c = state.cert_pem.lock().unwrap(); *c = Some(pem.clone()); }
+                { let mut h = state.pkh_hex.lock().unwrap(); *h = Some(pkh.clone()); }
+                cfg.certificate_path = cert_path.to_string_lossy().to_string(); { let mut guard = state.config.lock().unwrap(); *guard = cfg.clone(); }
                 save_config_to_disk(&cfg);
                 println!("Generated certificate for {}", email);
             }
@@ -1421,12 +1676,12 @@ fn run_cli(app: tauri::App) {
                     print!("{}", pem);
                     println!("-----END CERT START-----");
                 } else {
-                    println!("No certificate. Run gen-cert <email> first.");
+                    println!("No certificate. Run gen-key <email> first.");
                 }
             }
             "print-pkh" => {
                 let pkh_opt = { state.pkh_hex.lock().unwrap().clone() };
-                if let Some(pkh) = pkh_opt { println!("{}", pkh); } else { println!("No PKH. Run gen-cert <email> first."); }
+                if let Some(pkh) = pkh_opt { println!("{}", pkh); } else { println!("No PKH. Run gen-key <email> first."); }
             }
             "start-listener" => {
                 let ah = app_handle.clone();

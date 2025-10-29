@@ -3,10 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 8080",
     "build": "next build",
-    "start": "next start",
-    "start:8080": "next start -p 8080",
+    "start": "next start -p 8080",
     "lint": "eslint",
     "cypress:open": "cypress open",
     "cypress:e2e": "cypress run --e2e",
