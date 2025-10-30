@@ -24,15 +24,22 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({error: 'Missing required fields: email, socket_address'}, {status: 400});
         }
 
-        const user = await UserModel.findOne({where: {email}});
+        let user = await UserModel.findOne({where: {email}, raw: true});
         if (!user) {
             return NextResponse.json({error: 'User not registered'}, {status: 400});
+        }
+
+        const userId = (user as any).id;
+
+        // Ensure user.id is valid
+        if (!userId) {
+            return NextResponse.json({error: 'User ID is missing'}, {status: 500});
         }
 
         // Upsert by unique tuple (user_id, socket_address). If not unique in schema, emulate upsert.
         const existing = await BroadcastSourceModel.findOne({
             where: {
-                user_id: user.id,
+                user_id: userId as number,
                 socket_address
             }
         });
@@ -41,7 +48,7 @@ export async function POST(req: NextRequest) {
             await existing.save();
             return NextResponse.json(existing.toJSON(), {status: 200});
         } else {
-            const created = await BroadcastSourceModel.create({user_id: user.id, socket_address});
+            const created = await BroadcastSourceModel.create({user_id: userId as number, socket_address});
             return NextResponse.json(created.toJSON(), {status: 201});
         }
 

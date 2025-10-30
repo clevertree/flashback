@@ -38,9 +38,14 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({items: []}, {status: 200});
         }
 
+        // Ensure user.id is valid
+        if (!user.id) {
+            return NextResponse.json({items: []}, {status: 200});
+        }
+
         const items = await BroadcastSourceModel.findAll({
             where: {
-                user_id: user.id,
+                user_id: user.id as number,
                 updatedAt: {[Op.gte]: since},
             },
             order: [['updatedAt', 'DESC']],

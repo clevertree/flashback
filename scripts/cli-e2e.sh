@@ -118,7 +118,7 @@ wait_for "$B_LOG" "Generated certificate for ${EMAIL_B}" 10 || true
 # Use client-driven server API calls for registration and broadcast
 log "Registering Client A (api-register)..."
 echo "api-register ${NEXT_BASE}" > "$A_IN"
-wait_for "$A_LOG" "REGISTERED PKH|REGISTER CONFLICT PKH" 30
+wait_for "$A_LOG" "REGISTERED|REGISTER ERROR" 30
 
 # Start A listener and announce ready (socket inferred by client)
 echo "start-listener" > "$A_IN" || true

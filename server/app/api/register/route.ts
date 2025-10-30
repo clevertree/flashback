@@ -30,6 +30,11 @@ export async function POST(req: NextRequest) {
         if (!email)
             return NextResponse.json({error: "Invalid email attribute"}, {status: 400});
 
+        // Determine remote client IP from headers
+        const xf = req.headers.get('x-forwarded-for') || '';
+        const xr = req.headers.get('x-real-ip') || '';
+        const clientIP = (xf.split(',')[0]?.trim()) || xr || '127.0.0.1';
+
         const existing = await UserModel.findOne({
             where: { email }
         });
@@ -39,21 +44,23 @@ export async function POST(req: NextRequest) {
                 certificate,
                 email,
             });
+            return NextResponse.json({
+                email,
+                serverVersion: Package.version,
+                serverTitle: Package.name,
+                clientIP
+            }, {status: 201});
         } else {
             // Optionally update certificate if changed
             existing.certificate = certificate;
             await existing.save();
+            return NextResponse.json({
+                email,
+                serverVersion: Package.version,
+                serverTitle: Package.name,
+                clientIP
+            }, {status: 409});
         }
-        // Determine remote client IP from headers
-        const xf = req.headers.get('x-forwarded-for') || '';
-        const xr = req.headers.get('x-real-ip') || '';
-        const clientIP = (xf.split(',')[0]?.trim()) || xr || '127.0.0.1';
-        return NextResponse.json({
-            email,
-            serverVersion: Package.version,
-            serverTitle: Package.name,
-            clientIP
-        }, {status: 200});
 
     } catch (err: unknown) {
         if (err instanceof Error) {
