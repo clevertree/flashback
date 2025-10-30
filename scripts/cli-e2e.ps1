@@ -415,28 +415,10 @@ if (-not (Test-Path $B_CertPath))
 {
     throw "Timeout waiting for B cert file: $B_CertPath"
 }
-$sw.Restart(); while (-not (Test-Path $A_PkhPath) -and $sw.Elapsed.TotalSeconds -lt 20)
-{
-    Start-Sleep -Milliseconds 200
-}
-if (-not (Test-Path $A_PkhPath))
-{
-    throw "Timeout waiting for A PKH file: $A_PkhPath"
-}
-$sw.Restart(); while (-not (Test-Path $B_PkhPath) -and $sw.Elapsed.TotalSeconds -lt 20)
-{
-    Start-Sleep -Milliseconds 200
-}
-if (-not (Test-Path $B_PkhPath))
-{
-    throw "Timeout waiting for B PKH file: $B_PkhPath"
-}
 
 $CertA = (Get-Content -Raw $A_CertPath)
 $CertB = (Get-Content -Raw $B_CertPath)
-$PKH_A = (Get-Content -Raw $A_PkhPath).Trim().ToLower()
-$PKH_B = (Get-Content -Raw $B_PkhPath).Trim().ToLower()
-Log "PKH_A=$PKH_A PKH_B=$PKH_B"
+Log "EmailA=$EmailA EmailB=$EmailB"
 
 # Register both clients with the server
 Log 'Registering Client A via /api/register...'
@@ -457,14 +439,14 @@ Log "Register B status: $( $regB.StatusCode )"
 # Announce A via broadcast/ready
 $A_SOCKET_DIRECT = "127.0.0.1:$A_PORT"
 Log "Announcing A via /api/broadcast/ready with socket $A_SOCKET_DIRECT"
-$readyResp = Invoke-JsonPostRaw -Url "$NEXT_BASE/api/broadcast/ready" -BodyObj @{ publicKeyHash = $PKH_A; socket_address = $A_SOCKET_DIRECT }
+$readyResp = Invoke-JsonPostRaw -Url "$NEXT_BASE/api/broadcast/ready" -BodyObj @{ email = $EmailA; socket_address = $A_SOCKET_DIRECT }
 if ($readyResp.StatusCode -ne 200 -and $readyResp.StatusCode -ne 201)
 {
     throw "broadcast/ready failed: HTTP $( $readyResp.StatusCode ) Body=$( $readyResp.BodyText )"
 }
 
 # Lookup A from B's perspective
-$lookupUrl = "$NEXT_BASE/api/broadcast/lookup?publicKeyHash=$PKH_A&minutes=10"
+$lookupUrl = "$NEXT_BASE/api/broadcast/lookup?email=$EmailA&minutes=10"
 Log "Looking up A via $lookupUrl"
 $A_SOCKET = $null
 $sw.Restart()

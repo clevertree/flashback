@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Generate two certificates via the Flashback client CLI and write
 # server/cypress/fixtures/keys.json with certPem/certPem2 and
-# publicKeyHash/publicKeyHash2 (PKH as lowercase hex strings).
+# privateKey/privateKey2 (PEM format).
 #
 # This script launches two client instances in CLI mode, uses the
 # built-in `gen-cert <email> [path]` command to create deterministic
-# PEM files, reads the PKH files that the client writes to the logs dir,
+# PEM files, reads the certificate files that the client writes to the logs dir,
 # and then writes the fixture JSON.
 #
 # Output file:
@@ -78,31 +78,25 @@ echo "gen-cert ${EMAIL_B}" > "$B_IN"
 wait_for "$A_LOG" "Generated certificate for ${EMAIL_A}" 15 || true
 wait_for "$B_LOG" "Generated certificate for ${EMAIL_B}" 15 || true
 
-# PKH files are now written to the provided directories as publicKeyHash.txt
-A_PKH_FILE="${A_DIR}/publicKeyHash.txt"
-B_PKH_FILE="${B_DIR}/publicKeyHash.txt"
+# Read PEMs
+A_CERT_PATH="${A_DIR}/certificate.pem"
+B_CERT_PATH="${B_DIR}/certificate.pem"
 
-log "Waiting for PKH files: $A_PKH_FILE, $B_PKH_FILE"
-wait_for_file "$A_PKH_FILE" 20 || { log "Timed out waiting for $A_PKH_FILE"; exit 1; }
-wait_for_file "$B_PKH_FILE" 20 || { log "Timed out waiting for $B_PKH_FILE"; exit 1; }
+log "Waiting for certificate files: $A_CERT_PATH, $B_CERT_PATH"
+wait_for_file "$A_CERT_PATH" 20 || { log "Timed out waiting for $A_CERT_PATH"; exit 1; }
+wait_for_file "$B_CERT_PATH" 20 || { log "Timed out waiting for $B_CERT_PATH"; exit 1; }
 
-# Read PEMs and PKHs
+# Read PEMs
 if [ ! -f "$A_CERT_PATH" ] || [ ! -f "$B_CERT_PATH" ]; then
   log "Certificate PEM files were not created: $A_CERT_PATH | $B_CERT_PATH"
   exit 1
 fi
 A_CERT_PEM=$(cat "$A_CERT_PATH")
 B_CERT_PEM=$(cat "$B_CERT_PATH")
-A_PKH=$(tr -d '\r\n' < "$A_PKH_FILE" | tr 'A-Z' 'a-z')
-B_PKH=$(tr -d '\r\n' < "$B_PKH_FILE" | tr 'A-Z' 'a-z')
-
-# Basic sanity
-[ -n "$A_PKH" ] || { log "Empty PKH for A"; exit 1; }
-[ -n "$B_PKH" ] || { log "Empty PKH for B"; exit 1; }
 
 # Write JSON fixture using Node.js to avoid requiring jq
 log "Writing ${OUT_JSON}"
-export OUT_JSON A_CERT_PEM B_CERT_PEM A_PKH B_PKH
+export OUT_JSON A_CERT_PEM B_CERT_PEM
 node - <<'NODE'
 const fs = require('fs');
 const path = require('path');
@@ -110,8 +104,6 @@ const out = process.env.OUT_JSON;
 const data = {
   certPem: process.env.A_CERT_PEM,
   certPem2: process.env.B_CERT_PEM,
-  publicKeyHash: process.env.A_PKH,
-  publicKeyHash2: process.env.B_PKH,
 };
 fs.mkdirSync(path.dirname(out), {recursive: true});
 fs.writeFileSync(out, JSON.stringify(data, null, 2), 'utf8');

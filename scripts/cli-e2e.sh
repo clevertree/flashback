@@ -126,16 +126,11 @@ log "Announcing Client A ready (client infers socket)..."
 echo "api-ready ${NEXT_BASE}" > "$A_IN"
 wait_for "$A_LOG" "READY OK" 20 || { log "Client A did not confirm READY"; exit 1; }
 
-# Start client B listener and lookup A using PKH
+# Start client B listener and lookup A using email
 log "Starting client B listener and performing lookup..."
 echo "start-listener" > "$B_IN" || true
-# Acquire PKH_A from A's generated files
-A_PKH_PATH="wdio-logs/.log/clientA/publicKeyHash.txt"
-for i in {1..200}; do [ -f "$A_PKH_PATH" ] && break; sleep 0.1; done
-[ -f "$A_PKH_PATH" ] || { log "Timeout waiting for A PKH file: $A_PKH_PATH"; exit 1; }
-PKH_A=$(tr -d '\r\n' < "$A_PKH_PATH" | tr 'A-Z' 'a-z')
 
-echo "api-lookup ${NEXT_BASE} ${PKH_A} 10" > "$B_IN"
+echo "api-lookup ${NEXT_BASE} ${EMAIL_A} 10" > "$B_IN"
 wait_for "$B_LOG" "LOOKUP SOCKET" 30 || { log "Client B did not find A in lookup"; exit 1; }
 # Parse socket from B log
 A_SOCKET_LINE=$(grep -E "LOOKUP SOCKET" "$B_LOG" | tail -n1 || true)

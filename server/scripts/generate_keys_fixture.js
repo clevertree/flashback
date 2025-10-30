@@ -16,8 +16,6 @@
    {
      "certPem": string,
      "certPem2": string,
-     "publicKeyHash": string,
-     "publicKeyHash2": string,
      "privateKey": string,
      "privateKey2": string
    }
@@ -178,7 +176,7 @@ function readTrim(filePath) {
 function verifyFixture(filePath) {
     const raw = fs.readFileSync(filePath, 'utf8');
     const obj = JSON.parse(raw);
-    const expected = ['certPem', 'certPem2', 'publicKeyHash', 'publicKeyHash2', 'privateKey', 'privateKey2'];
+    const expected = ['certPem', 'certPem2', 'privateKey', 'privateKey2'];
     const ok = expected.every((k) => Object.prototype.hasOwnProperty.call(obj, k) && typeof obj[k] === 'string');
     if (!ok) {
         throw new Error(`Fixture at ${filePath} is missing required fields: ${expected.join(', ')}`);
@@ -249,18 +247,8 @@ async function main() {
     const privateKey = readTrim(privAPath);
     const privateKey2 = readTrim(privBPath);
 
-    // PKH files are written into the specified directories as publicKeyHash.txt
-    const pkhAPath = path.join(dirA, 'publicKeyHash.txt');
-    const pkhBPath = path.join(dirB, 'publicKeyHash.txt');
-
-    await waitForFile(pkhAPath, 15000);
-    await waitForFile(pkhBPath, 15000);
-
-    const publicKeyHash = readTrim(pkhAPath).toLowerCase();
-    const publicKeyHash2 = readTrim(pkhBPath).toLowerCase();
-
     const outPath = path.resolve(process.cwd(), args.out);
-    const data = {certPem, certPem2, publicKeyHash, publicKeyHash2, privateKey, privateKey2};
+    const data = {certPem, certPem2, privateKey, privateKey2};
     writeJson(outPath, data);
     console.log(`Fixture written: ${outPath}`);
 

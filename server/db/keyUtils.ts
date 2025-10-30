@@ -4,8 +4,6 @@ import {X509Certificate} from "crypto";
 export function parseCertWithNodeCrypto(certPem: string): { email?: string } {
     try {
         const x509 = new X509Certificate(certPem);
-        // Compute SHA-256 over raw DER certificate bytes
-        // const publicKeyHash = createHash('sha256').update(x509.raw).digest(digest'hex');
 
         // Extract email from SAN (preferred) or Subject fallback
         let email: string | undefined;

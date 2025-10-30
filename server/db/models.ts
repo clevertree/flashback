@@ -36,11 +36,6 @@ export class UserModel extends Model {
     @Column(DataType.STRING(256))
     email!: string;
 
-    // @Unique
-    // @AllowNull(false)
-    // @Column(DataType.STRING(256))
-    // publicKeyHash!: string;
-
     @AllowNull(false)
     @Column(DataType.TEXT)
     certificate!: string;
@@ -112,10 +107,15 @@ const sequelize = new Sequelize(databaseUrl, {
 export async function initDatabase() {
     try {
         // await sequelize.authenticate();
+        const isTestMode =
+            process.env.NODE_ENV === 'test' ||
+            process.env.CYPRESS_RESET_DB === 'true' ||
+            process.env.TEST_MODE === 'true';
+        
         await sequelize.sync({
-            alter: false,
+            alter: isTestMode ? true : false,
             force: false,
-            logging: console.log
+            logging: isTestMode ? console.log : false
         });
         console.log('Database connection established successfully.');
     } catch (error) {
