@@ -63,8 +63,8 @@ export default function Home() {
     }, []);
 
     return (
-        <div className="min-h-screen p-6 text-sm text-gray-900">
-            <h1 className="text-2xl font-semibold mb-4">Flashback Client</h1>
+        <div className="min-h-screen p-6 bg-slate-900 text-slate-100">
+            <h1 className="text-2xl font-semibold mb-4 text-white">Flashback Client</h1>
             {/* Section 1: Generate or Locate Private Key */}
             <KeySection defaultConfigPath={defaultCertPath}
                         onKeyVerified={() => setKeyVerified(true)}

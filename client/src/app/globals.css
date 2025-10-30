@@ -9,6 +9,15 @@ html, body, #__next {
 
 body {
   margin: 0;
-  background-color: #ffffff; /* neutral default; dark mode via Tailwind classes only */
-  color: #111827; /* gray-900 */
+  background-color: #0f172a; /* slate-900: dark background matching app theme */
+  color: #f1f5f9; /* slate-100: light text for contrast */
+}
+
+/* Ensure input fields have proper text color for visibility */
+input {
+  color: #ffffff;
+}
+
+input::placeholder {
+  color: #9ca3af;
 }

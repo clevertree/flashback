@@ -24,11 +24,11 @@ export default function SettingsSection({
                                         }: SettingsSectionProps) {
     return (
         <section id="settings" className="bg-gray-800 rounded-lg p-6 shadow-lg mt-8">
-            <h2 className="text-2xl font-semibold mb-4">Settings</h2>
+            <h2 className="text-2xl font-semibold mb-4 text-white">Settings</h2>
 
             <div className="space-y-6">
                 <div>
-                    <h3 className="text-lg font-medium mb-2">Navigation</h3>
+                    <h3 className="text-lg font-medium mb-2 text-gray-200">Navigation</h3>
                     <div className="inline-flex rounded border border-gray-600 overflow-hidden" role="group"
                          aria-label="Nav side">
                         {(['left', 'right'] as NavSide[]).map((side) => (
@@ -44,8 +44,8 @@ export default function SettingsSection({
                 </div>
 
                 <div>
-                    <h3 className="text-lg font-medium mb-2">Media</h3>
-                    <label className="inline-flex items-center gap-2 text-sm">
+                    <h3 className="text-lg font-medium mb-2 text-gray-200">Media</h3>
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-300">
                         <input type="checkbox" checked={autoPlayMedia}
                                onChange={(e) => onToggleAutoPlay(e.target.checked)}/>
                         Auto-play media streams
@@ -53,8 +53,8 @@ export default function SettingsSection({
                 </div>
 
                 <div>
-                    <h3 className="text-lg font-medium mb-2">Connectivity</h3>
-                    <div className="flex flex-col gap-2 text-sm">
+                    <h3 className="text-lg font-medium mb-2 text-gray-200">Connectivity</h3>
+                    <div className="flex flex-col gap-2 text-sm text-gray-300">
                         <label className="inline-flex items-center gap-2">
                             <input type="checkbox" checked={connectOnStartup}
                                    onChange={(e) => onToggleConnectOnStartup(e.target.checked)} />
