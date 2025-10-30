@@ -64,8 +64,8 @@ if (typeof window !== 'undefined') {
                         const res = await invoke('api_ready', {localIP, remoteIP, broadcastPort}) as string
                         return res
                     },
-                    apiLookup: async (publicKeyHash: string, minutes?: number) => {
-                        const res = await invoke('api_lookup', {publicKeyHash, minutes}) as string
+                    apiLookup: async (email: string, minutes?: number) => {
+                        const res = await invoke('api_lookup', {email, minutes}) as string
                         return res
                     }
                 }

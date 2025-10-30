@@ -149,6 +149,9 @@ struct RuntimeConfig {
     // Base URL for server API
     #[serde(default = "default_base_url")]
     base_url: String,
+    // User email identifier parsed from certificate
+    #[serde(default)]
+    email: String,
 }
 
 fn default_app_data_dir_fallback() -> std::path::PathBuf {
@@ -189,6 +192,7 @@ impl Default for RuntimeConfig {
         Self {
             certificate_path: cert.to_string_lossy().to_string(),
             base_url: default_base_url(),
+            email: String::new(),
         }
     }
 }
@@ -1412,14 +1416,6 @@ fn cert_dir_from_config(cfg: &RuntimeConfig) -> std::path::PathBuf {
     }
 }
 
-fn read_pkh_from_config(cfg: &RuntimeConfig) -> Result<String, String> {
-    let dir = cert_dir_from_config(cfg);
-    let hash_path = dir.join("publicKeyHash.txt");
-    let pkh = std::fs::read_to_string(&hash_path)
-        .map_err(|e| format!("No publicKeyHash.txt at {}: {}", hash_path.to_string_lossy(), e))?;
-    Ok(pkh.trim().to_string())
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UiGenArgs {
     email: String,
@@ -1572,27 +1568,18 @@ async fn ui_generate_user_keys_and_cert(
     let pem = cert
         .serialize_pem()
         .map_err(|e| format!("Serialize PEM error: {}", e))?;
-    let der = cert
-        .serialize_der()
-        .map_err(|e| format!("Serialize DER error: {}", e))?;
     let priv_pem = cert.serialize_private_key_pem();
-    // Compute PKH (SHA-256 over DER)
-    let mut hasher = Sha256::new();
-    hasher.update(&der);
-    let pkh = hex_crate::encode(hasher.finalize());
     // Write files
     let cert_path = out_dir.join("certificate.pem");
     let priv_path = out_dir.join("private.key");
-    let hash_path = out_dir.join("publicKeyHash.txt");
     std::fs::write(&cert_path, &pem).map_err(|e| format!("Write certificate.pem failed: {}", e))?;
     std::fs::write(&priv_path, &priv_pem)
         .map_err(|e| format!("Write private.key failed: {}", e))?;
-    std::fs::write(&hash_path, &pkh)
-        .map_err(|e| format!("Write publicKeyHash.txt failed: {}", e))?;
     // Persist config certificate_path -> certificate.pem (no PKH in state)
     {
         let mut cfg = state.config.lock().unwrap().clone();
         cfg.certificate_path = cert_path.to_string_lossy().to_string();
+        cfg.email = args.email.clone();
         let mut guard = state.config.lock().unwrap();
         *guard = cfg.clone();
         save_config_to_disk(&cfg);
@@ -1620,7 +1607,7 @@ fn main() {
         cli_auto_allow: Arc::new(Mutex::new(false)),
         allowed_peers: Arc::new(Mutex::new(std::collections::HashSet::new())),
         pending_request: Arc::new(Mutex::new(None)),
-        config: Arc::new(Mutex::new(initial_cfg)), 
+        config: Arc::new(Mutex::new(initial_cfg)),
     };
 
     let args: Vec<String> = std::env::args().collect();
@@ -1694,18 +1681,8 @@ fn main() {
                                 String::new()
                             }
                         };
-                        let der = match cert.serialize_der() {
-                            Ok(d) => d,
-                            Err(e) => {
-                                println!("Error serializing DER: {}", e);
-                                Vec::new()
-                            }
-                        };
                         let priv_pem = cert.serialize_private_key_pem();
-                        if !pem.is_empty() && !der.is_empty() {
-                            let mut hasher = Sha256::new();
-                            hasher.update(&der);
-                            let pkh = hex_crate::encode(hasher.finalize());
+                        if !pem.is_empty() {
                             // Determine output directory from runtime config (same dir as certificate_path)
                             let cfg_cur = st.config.lock().unwrap().clone();
                             let cert_path_cur =
@@ -1717,22 +1694,12 @@ fn main() {
                             let _ = std::fs::create_dir_all(&out_dir);
                             let cert_path = out_dir.join("certificate.pem");
                             let priv_path = out_dir.join("private.key");
-                            let hash_path = out_dir.join("publicKeyHash.txt");
                             let _ = std::fs::write(&cert_path, &pem);
                             let _ = std::fs::write(&priv_path, &priv_pem);
-                            let _ = std::fs::write(&hash_path, &pkh);
-                            // Also write legacy PKH file into logs dir for backward compatibility
-                            let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
-                                std::path::PathBuf::from(dir)
-                            } else {
-                                logs_dir_from_app(None)
-                            };
-                            let _ = std::fs::create_dir_all(&ld);
-                            ld.push(format!("pkh-{}.txt", std::process::id()));
-                            let _ = std::fs::write(&ld, &pkh);
                             // Persist config (ensure certificate_path points to certificate.pem in this dir)
                             let mut cfg_save = cfg_cur.clone();
                             cfg_save.certificate_path = cert_path.to_string_lossy().to_string();
+                            cfg_save.email = email.clone();
                             {
                                 let mut guard = st.config.lock().unwrap();
                                 *guard = cfg_save.clone();
@@ -1750,7 +1717,12 @@ fn main() {
                 // Start listener before entering interactive loop
                 let ah = app.handle();
                 let st2 = app.state::<AppState>();
-                let _ = tauri::async_runtime::block_on(start_peer_listener_async(st2, ah.clone(), None, None));
+                let _ = tauri::async_runtime::block_on(start_peer_listener_async(
+                    st2,
+                    ah.clone(),
+                    None,
+                    None,
+                ));
             }
         }
         run_cli(app);
@@ -1809,15 +1781,14 @@ fn print_cli_help() {
     println!("  allow                Approve the pending incoming chat/transfer request");
     println!("  allow auto           Auto-approve all incoming chats/transfers for this session");
     println!("  deny                 Reject the pending incoming chat/transfer request");
-    println!("  gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]\n                       Generate or reuse a key: writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
-    println!("  gen-cert <email>      (alias) Generate a self-signed cert and private key; writes private.key, certificate.pem, publicKeyHash.txt next to Config.certificate_path");
+    println!("  gen-key <email> [--password=***] [--bits=N] [--alg=ecdsa|ed25519|rsa] [--reuse-key]\n                       Generate or reuse a key: writes private.key, certificate.pem next to Config.certificate_path");
+    println!("  gen-cert <email>      (alias) Generate a self-signed cert and private key; writes private.key, certificate.pem next to Config.certificate_path");
     println!("  set-cert-path <path> Set Config.privateKeyPath (file path). If a directory is provided, 'certificate.pem' will be appended");
     println!("  print-cert           Print the generated certificate PEM between markers");
-    println!("  print-pkh            Print the SHA-256 hash of DER certificate as hex (lowercase)");
     println!("  start-listener       Start the peer listener on an ephemeral port (no server connection)");
-    println!("  api-register [baseUrl]   Register certificate with server; stores PKH and prints 'REGISTERED PKH <pkh>'");
+    println!("  api-register [baseUrl]   Register certificate with server");
     println!("  api-ready [baseUrl] [ip:port]  Announce ready socket; if ip:port omitted, uses local listener; prints 'READY OK <ip:port>'");
-    println!("  api-lookup [baseUrl] <pkh> [minutes]  Lookup recent sockets; prints 'LOOKUP SOCKET <ip:port>' or 'LOOKUP NONE'");
+    println!("  api-lookup [baseUrl] <email> [minutes]  Lookup recent sockets; prints 'LOOKUP SOCKET <ip:port>' or 'LOOKUP NONE'");
     println!("  quit | exit          Exit the CLI");
 }
 
@@ -2046,16 +2017,9 @@ async fn api_register(state: State<'_, AppState>) -> Result<String, String> {
     let body = serde_json::json!({"certificate": cert});
     let (status, json) = http_post_json(&url, body).await?;
     if status == StatusCode::CREATED {
-        let pkh = json
-            .get("publicKeyHash")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        Ok(format!("REGISTERED PKH {}", pkh))
+        Ok(format!("REGISTERED"))
     } else if status == StatusCode::CONFLICT {
-        let cfg = state.config.lock().unwrap().clone();
-        let pkh = read_pkh_from_config(&cfg).unwrap_or_default();
-        Ok(format!("REGISTER CONFLICT PKH {}", pkh))
+        Ok(format!("REGISTER CONFLICT"))
     } else {
         Ok(format!("REGISTER ERROR {} {}", status.as_u16(), json))
     }
@@ -2103,15 +2067,14 @@ async fn api_ready(
         }
     };
     let cfg_cur = state.config.lock().unwrap().clone();
-    let pkh = read_pkh_from_config(&cfg_cur)
-        .map_err(|_| "No PKH. Run gen-key and api-register first.".to_string())?;
 
     // Ensure peer listener is started and configured
     let need_start = { state.self_info.lock().unwrap().is_none() };
     if need_start {
         let bind_host = localIP.clone().filter(|s| !s.trim().is_empty());
         let bind_port = broadcastPort;
-        let _ = start_peer_listener_async(state.clone(), app_handle.clone(), bind_host, bind_port).await?;
+        let _ = start_peer_listener_async(state.clone(), app_handle.clone(), bind_host, bind_port)
+            .await?;
     }
     // After ensuring listener, read the actual port
     let (actual_local_ip, actual_port) = {
@@ -2127,10 +2090,16 @@ async fn api_ready(
     // Build the socket_address to announce
     let remote_host_opt: Option<String> = if let Some(r) = remoteIP.clone() {
         let r = r.trim();
-        if r.is_empty() { None } else if r.contains(':') {
+        if r.is_empty() {
+            None
+        } else if r.contains(':') {
             parse_host_port(r).ok().map(|(h, _)| h)
-        } else { Some(r.to_string()) }
-    } else { None };
+        } else {
+            Some(r.to_string())
+        }
+    } else {
+        None
+    };
     let host_for_broadcast = remote_host_opt
         .or_else(|| localIP.clone())
         .filter(|s| !s.trim().is_empty())
@@ -2138,7 +2107,11 @@ async fn api_ready(
     let sock = format!("{}:{}", host_for_broadcast, actual_port);
 
     let url = format!("{}/api/broadcast/ready", base.trim_end_matches('/'));
-    let body = serde_json::json!({"publicKeyHash": pkh, "socket_address": sock});
+    let email_val = cfg_cur.email.clone();
+    if email_val.trim().is_empty() {
+        return Err("Email is not set in config. Please generate keys (username) first.".to_string());
+    }
+    let body = serde_json::json!({"email": email_val, "socket_address": sock});
     let (status, json) = http_post_json(&url, body).await?;
     if status == StatusCode::OK || status == StatusCode::CREATED {
         Ok(format!(
@@ -2154,7 +2127,7 @@ async fn api_ready(
 
 #[tauri::command]
 async fn api_lookup(
-    public_key_hash: String,
+    email: String,
     minutes: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -2169,9 +2142,9 @@ async fn api_lookup(
     };
     let mins = minutes.unwrap_or(10);
     let url = format!(
-        "{}/api/broadcast/lookup?publicKeyHash={}&minutes={}",
+        "{}/api/broadcast/lookup?email={}&minutes={}",
         base.trim_end_matches('/'),
-        public_key_hash,
+        email,
         mins
     );
     let (status, json) = http_get_json(&url).await?;
@@ -2313,19 +2286,6 @@ fn run_cli(app: tauri::App) {
                 let _ = std::fs::create_dir_all(&out_dir);
                 let cert_path = out_dir.join("certificate.pem");
                 let priv_path = out_dir.join("private.key");
-                let hash_path = out_dir.join("publicKeyHash.txt");
-
-                // Helper: write legacy PKH file. TODO: remove
-                let write_legacy_pkh = |pkh: &str| {
-                    let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
-                        std::path::PathBuf::from(dir)
-                    } else {
-                        logs_dir_from_app(None)
-                    };
-                    let _ = std::fs::create_dir_all(&ld);
-                    ld.push(format!("pkh-{}.txt", std::process::id()));
-                    let _ = std::fs::write(&ld, pkh);
-                };
 
                 // Reuse mode: do not generate a new private key
                 if reuse {
@@ -2378,26 +2338,16 @@ fn run_cli(app: tauri::App) {
                                 continue;
                             }
                         }
-                        if let Some(pem) = pem_opt {
-                            // compute PKH from PEM
-                            let der = pem_to_der(&pem).unwrap_or_default();
-                            if der.is_empty() {
-                                println!("Failed to compute hash from certificate.pem");
-                                continue;
-                            }
-                            let mut hasher = Sha256::new();
-                            hasher.update(&der);
-                            let pkh = hex_crate::encode(hasher.finalize());
-                            let _ = std::fs::write(&hash_path, &pkh);
-                            write_legacy_pkh(&pkh);
-                            // update config path only (no PKH in state)
+                        if let Some(_pem) = pem_opt {
+                            // update config path and email only
                             cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                            // best effort: preserve existing cfg.email; user can re-register to set server-side mapping
                             {
                                 let mut guard = state.config.lock().unwrap();
                                 *guard = cfg.clone();
                             }
                             save_config_to_disk(&cfg);
-                            println!("Reused existing private.key; ensured certificate.pem and publicKeyHash.txt");
+                            println!("Reused existing private.key; ensured certificate.pem");
                         }
                     } else {
                         println!(
@@ -2442,22 +2392,11 @@ fn run_cli(app: tauri::App) {
                         continue;
                     }
                 };
-                let der = match cert.serialize_der() {
-                    Ok(d) => d,
-                    Err(e) => {
-                        println!("Error serializing DER: {}", e);
-                        continue;
-                    }
-                };
                 let priv_pem = cert.serialize_private_key_pem();
-                let mut hasher = Sha256::new();
-                hasher.update(&der);
-                let pkh = hex_crate::encode(hasher.finalize());
                 let _ = std::fs::write(&cert_path, &pem);
                 let _ = std::fs::write(&priv_path, &priv_pem);
-                let _ = std::fs::write(&hash_path, &pkh);
-                write_legacy_pkh(&pkh);
                 cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                cfg.email = email.clone();
                 {
                     let mut guard = state.config.lock().unwrap();
                     *guard = cfg.clone();
@@ -2508,17 +2447,7 @@ fn run_cli(app: tauri::App) {
                         continue;
                     }
                 };
-                let der = match cert.serialize_der() {
-                    Ok(d) => d,
-                    Err(e) => {
-                        println!("Error serializing DER: {}", e);
-                        continue;
-                    }
-                };
                 let priv_pem = cert.serialize_private_key_pem();
-                let mut hasher = Sha256::new();
-                hasher.update(&der);
-                let pkh = hex_crate::encode(hasher.finalize());
                 let mut cfg = state.config.lock().unwrap().clone();
                 let cert_path_cur = std::path::PathBuf::from(cfg.certificate_path.clone());
                 let out_dir = cert_path_cur
@@ -2528,19 +2457,10 @@ fn run_cli(app: tauri::App) {
                 let _ = std::fs::create_dir_all(&out_dir);
                 let cert_path = out_dir.join("certificate.pem");
                 let priv_path = out_dir.join("private.key");
-                let hash_path = out_dir.join("publicKeyHash.txt");
                 let _ = std::fs::write(&cert_path, &pem);
                 let _ = std::fs::write(&priv_path, &priv_pem);
-                let _ = std::fs::write(&hash_path, &pkh);
-                let mut ld = if let Ok(dir) = std::env::var("WDIO_LOGS_DIR") {
-                    std::path::PathBuf::from(dir)
-                } else {
-                    logs_dir_from_app(None)
-                };
-                let _ = std::fs::create_dir_all(&ld);
-                ld.push(format!("pkh-{}.txt", std::process::id()));
-                let _ = std::fs::write(&ld, &pkh);
                 cfg.certificate_path = cert_path.to_string_lossy().to_string();
+                cfg.email = email.clone();
                 {
                     let mut guard = state.config.lock().unwrap();
                     *guard = cfg.clone();
@@ -2557,13 +2477,6 @@ fn run_cli(app: tauri::App) {
                     println!("-----END CERT START-----");
                 } else {
                     println!("No certificate. Run gen-key <email> first.");
-                }
-            }
-            "print-pkh" => {
-                let cfg = state.config.lock().unwrap().clone();
-                match read_pkh_from_config(&cfg) {
-                    Ok(pkh) => println!("{}", pkh),
-                    Err(_) => println!("No PKH. Run gen-key <email> first."),
                 }
             }
             "start-listener" => {
@@ -2836,9 +2749,16 @@ fn run_cli(app: tauri::App) {
                 }
                 let st = state.clone();
                 // Map optional ip:port to localIP and broadcastPort; remoteIP unused in CLI
-                let (local_ip_opt, port_opt): (Option<String>, Option<u16>) = if let Some(sock) = sock_opt.clone() {
-                    if let Ok((h, p)) = parse_host_port(&sock) { (Some(h), Some(p)) } else { (None, None) }
-                } else { (None, None) };
+                let (local_ip_opt, port_opt): (Option<String>, Option<u16>) =
+                    if let Some(sock) = sock_opt.clone() {
+                        if let Ok((h, p)) = parse_host_port(&sock) {
+                            (Some(h), Some(p))
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    };
                 let fut = api_ready(local_ip_opt, None, port_opt, st, app_handle.clone());
                 match async_runtime::block_on(fut) {
                     Ok(m) => println!("{}", m),
@@ -2846,10 +2766,10 @@ fn run_cli(app: tauri::App) {
                 }
             }
             "api-lookup" => {
-                // usage: api-lookup [baseUrl] <pkh> [minutes]
+                // usage: api-lookup [baseUrl] <email> [minutes]
                 let mut base: Option<String> = None;
                 let first = parts.next().map(|s| s.to_string());
-                let (pkh, minutes) = if let Some(f) = first.clone() {
+                let (email, minutes) = if let Some(f) = first.clone() {
                     if f.contains("://") {
                         base = first;
                         (
@@ -2870,15 +2790,15 @@ fn run_cli(app: tauri::App) {
                         save_config_to_disk(&cfg.clone());
                     }
                 }
-                let pkh = match pkh {
+                let email = match email {
                     Some(p) => p,
                     None => {
-                        println!("Usage: api-lookup [baseUrl] <pkh> [minutes]");
+                        println!("Usage: api-lookup [baseUrl] <email> [minutes]");
                         continue;
                     }
                 };
                 let st = state.clone();
-                let fut = api_lookup(pkh, minutes, st);
+                let fut = api_lookup(email, minutes, st);
                 match async_runtime::block_on(fut) {
                     Ok(m) => println!("{}", m),
                     Err(e) => println!("Error: {}", e),

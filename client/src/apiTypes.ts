@@ -1,6 +1,6 @@
 export interface RegisterResultData {
     id?: number;
-    publicKeyHash?: string;
+    email?: string;
     serverVersion?: string;
     serverTitle?: string;
     clientIP: string;

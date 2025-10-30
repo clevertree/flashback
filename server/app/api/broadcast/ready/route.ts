@@ -5,7 +5,7 @@ import {BroadcastSourceModel, initDatabase, UserModel} from '@/db/models';
 export const runtime = 'nodejs';
 
 interface BroadcastReadyRequestBody {
-    publicKeyHash: string;
+    email: string;
     socket_address: string;
 }
 
@@ -19,12 +19,12 @@ export async function POST(req: NextRequest) {
         const body: BroadcastReadyRequestBody = await req.json().catch(() => null);
         if (!body) return NextResponse.json({error: 'Invalid JSON body'}, {status: 400});
 
-        const {publicKeyHash, socket_address} = body || {};
-        if (!publicKeyHash || !socket_address) {
-            return NextResponse.json({error: 'Missing required fields: publicKeyHash, socket_address'}, {status: 400});
+        const {email, socket_address} = body || {};
+        if (!email || !socket_address) {
+            return NextResponse.json({error: 'Missing required fields: email, socket_address'}, {status: 400});
         }
 
-        const user = await UserModel.findOne({where: {publicKeyHash}});
+        const user = await UserModel.findOne({where: {email}});
         if (!user) {
             return NextResponse.json({error: 'User not registered'}, {status: 400});
         }

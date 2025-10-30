@@ -36,10 +36,10 @@ export class UserModel extends Model {
     @Column(DataType.STRING(256))
     email!: string;
 
-    @Unique
-    @AllowNull(false)
-    @Column(DataType.STRING(256))
-    publicKeyHash!: string;
+    // @Unique
+    // @AllowNull(false)
+    // @Column(DataType.STRING(256))
+    // publicKeyHash!: string;
 
     @AllowNull(false)
     @Column(DataType.TEXT)

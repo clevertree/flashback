@@ -40,7 +40,7 @@ interface IFlashBackCrypto {
 interface IFlashBackAPI {
     apiRegisterJson: () => Promise<{ status: number; data: any }>;
     apiReady: (localIP: string, remoteIP: string, broadcastPort: number) => Promise<string>;
-    apiLookup: (publicKeyHash: string, minutes?: number) => Promise<string>;
+    apiLookup: (email: string, minutes?: number) => Promise<string>;
 }
 
 declare global {

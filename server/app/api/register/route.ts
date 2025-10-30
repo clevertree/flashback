@@ -11,7 +11,7 @@ export interface RegisterRequestBody {
 }
 
 /**
- * Registers a user public key pair to be used for identifying users, media, and broadcast servers..
+ * Registers a user certificate to be used for identifying users, media, and broadcast servers.
  */
 export async function POST(req: NextRequest) {
     try {
@@ -23,47 +23,33 @@ export async function POST(req: NextRequest) {
         const {certificate} = body;
 
         if (!certificate) {
-            return NextResponse.json({error: 'Missing required fields: public_key_full'}, {status: 400});
+            return NextResponse.json({error: 'Missing required fields: certificate'}, {status: 400});
         }
 
-        const {email, publicKeyHash} = parseCertWithNodeCrypto(certificate);
+        const {email} = parseCertWithNodeCrypto(certificate);
         if (!email)
             return NextResponse.json({error: "Invalid email attribute"}, {status: 400});
-        if (!publicKeyHash)
-            return NextResponse.json({error: "Invalid hash"}, {status: 400});
 
         const existing = await UserModel.findOne({
-            where: {
-                email,
-                publicKeyHash
-            }
+            where: { email }
         });
 
         if (!existing) {
-            const existingUser = await UserModel.findOne({
-                where: {email}
-            });
-
-            if (existingUser) {
-                // Email exists with a different key
-                return NextResponse.json(
-                    {error: 'User already exists with a different public key.'},
-                    {status: 409}
-                );
-            }
-
             await UserModel.create({
                 certificate,
-                publicKeyHash,
                 email,
             });
+        } else {
+            // Optionally update certificate if changed
+            existing.certificate = certificate;
+            await existing.save();
         }
         // Determine remote client IP from headers
         const xf = req.headers.get('x-forwarded-for') || '';
         const xr = req.headers.get('x-real-ip') || '';
         const clientIP = (xf.split(',')[0]?.trim()) || xr || '127.0.0.1';
         return NextResponse.json({
-            publicKeyHash,
+            email,
             serverVersion: Package.version,
             serverTitle: Package.name,
             clientIP
