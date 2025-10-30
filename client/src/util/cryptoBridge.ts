@@ -39,6 +39,7 @@ interface IFlashBackCrypto {
 
 interface IFlashBackAPI {
     apiRegisterJson: () => Promise<{ status: number; data: any }>;
+    apiGetClients: () => Promise<{ status: number; clients: any[] }>;
     apiReady: (localIP: string, remoteIP: string, broadcastPort: number) => Promise<string>;
     apiLookup: (email: string, minutes?: number) => Promise<string>;
 }

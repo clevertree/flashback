@@ -1642,8 +1642,12 @@ fn main() {
                 peer_send_file_cancel,
                 peer_send_dcc_chat,
                 api_register,
+                api_register_json,
+                api_get_clients,
                 api_ready,
                 api_lookup,
+                list_shareable_files,
+                get_shareable_file,
                 ui_load_private_key,
                 ui_generate_user_keys_and_cert
             ])
@@ -1758,11 +1762,14 @@ fn main() {
             peer_send_file_cancel,
             peer_send_dcc_chat,
             api_register,
+            api_register_json,
+            api_get_clients,
             api_ready,
             api_lookup,
+            list_shareable_files,
+            get_shareable_file,
             ui_load_private_key,
-            ui_generate_user_keys_and_cert,
-            api_register_json
+            ui_generate_user_keys_and_cert
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -2057,6 +2064,35 @@ async fn api_register_json(state: State<'_, AppState>) -> Result<serde_json::Val
 }
 
 #[tauri::command]
+async fn api_get_clients(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
+    };
+    let url = format!("{}/api/clients", base.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get clients: {}", e))?;
+    let status = response.status();
+    let json = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    Ok(serde_json::json!({
+        "status": status.as_u16(),
+        "clients": json.get("clients").cloned().unwrap_or(serde_json::json!([]))
+    }))
+}
+
+#[tauri::command]
 async fn api_ready(
     localIP: Option<String>,
     remoteIP: Option<String>,
@@ -2130,6 +2166,112 @@ async fn api_ready(
     } else {
         Ok(format!("READY ERROR {} {}", status.as_u16(), json))
     }
+}
+
+// Allowed file extensions for serving (whitelist)
+const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
+    ".md", ".markdown", ".txt", ".css",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp",
+    ".mp4", ".webm", ".mov", ".avi",
+    ".mp3", ".wav", ".m4a", ".flac",
+];
+
+// Blocked file extensions (blacklist)
+const BLOCKED_FILE_EXTENSIONS: &[&str] = &[
+    ".html", ".htm", ".js", ".jsx", ".ts", ".tsx",
+    ".exe", ".bin", ".sh", ".bat", ".cmd", ".ps1",
+    ".dll", ".so", ".dylib", ".jar", ".class",
+];
+
+fn is_file_allowed(file_path: &str) -> bool {
+    let lower_path = file_path.to_lowercase();
+    
+    // Check blacklist first (deny)
+    for ext in BLOCKED_FILE_EXTENSIONS {
+        if lower_path.ends_with(ext) {
+            return false;
+        }
+    }
+    
+    // Check whitelist (allow)
+    for ext in ALLOWED_FILE_EXTENSIONS {
+        if lower_path.ends_with(ext) {
+            return true;
+        }
+    }
+    
+    // Default: deny unknown types
+    false
+}
+
+fn get_content_type(file_path: &str) -> &'static str {
+    let lower = file_path.to_lowercase();
+    
+    if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt") {
+        "text/plain"
+    } else if lower.ends_with(".css") {
+        "text/css"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".mp4") {
+        "video/mp4"
+    } else if lower.ends_with(".webm") {
+        "video/webm"
+    } else if lower.ends_with(".mov") {
+        "video/quicktime"
+    } else if lower.ends_with(".avi") {
+        "video/x-msvideo"
+    } else if lower.ends_with(".mp3") {
+        "audio/mpeg"
+    } else if lower.ends_with(".wav") {
+        "audio/wav"
+    } else if lower.ends_with(".m4a") {
+        "audio/mp4"
+    } else if lower.ends_with(".flac") {
+        "audio/flac"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+#[tauri::command]
+async fn list_shareable_files() -> Result<serde_json::json::Value, String> {
+    // TODO: Implement file listing from a designated share directory
+    // For now, return mock data
+    Ok(serde_json::json!({
+        "status": 200,
+        "files": [
+            {"name": "README.md", "type": "file", "size": 2048},
+            {"name": "guide.md", "type": "file", "size": 4096},
+            {"name": "style.css", "type": "file", "size": 1024},
+        ]
+    }))
+}
+
+#[tauri::command]
+async fn get_shareable_file(path: String) -> Result<serde_json::json::Value, String> {
+    // Check if file extension is allowed
+    if !is_file_allowed(&path) {
+        return Err(format!("File type not allowed: {}", path));
+    }
+    
+    // TODO: Implement secure file serving from designated share directory
+    // For now, return mock data
+    Ok(serde_json::json!({
+        "status": 200,
+        "data": {
+            "name": "example.md",
+            "type": "text/plain",
+            "size": 2048,
+            "content": "# Example File\n\nThis is a markdown file."
+        }
+    }))
 }
 
 #[tauri::command]

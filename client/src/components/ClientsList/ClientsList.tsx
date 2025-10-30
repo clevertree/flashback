@@ -70,7 +70,7 @@ export default function ClientsList({ id = 'clients', clients, selfIp, selfPort,
                       className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 rounded"
                       onClick={() => onDccConnect(client)}
                     >
-                      Connect
+                      Visit
                     </button>
                   )}
                 </div>

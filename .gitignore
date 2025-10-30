@@ -3,3 +3,4 @@ peer-port-*.txt
 *.pem
 *.
 wdio-logs
+.vercel

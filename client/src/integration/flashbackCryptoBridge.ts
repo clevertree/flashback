@@ -60,6 +60,10 @@ if (typeof window !== 'undefined') {
                         const res = await invoke('api_register_json', {}) as { status: number; data: any }
                         return res
                     },
+                    apiGetClients: async () => {
+                        const res = await invoke('api_get_clients', {}) as { status: number; clients: any[] }
+                        return res
+                    },
                     apiReady: async (localIP: string, remoteIP: string, broadcastPort: number) => {
                         const res = await invoke('api_ready', {localIP, remoteIP, broadcastPort}) as string
                         return res
