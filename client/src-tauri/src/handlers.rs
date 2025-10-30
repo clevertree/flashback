@@ -296,4 +296,56 @@ mod tests {
         assert_eq!(args.email, "test@example.com");
         assert_eq!(args.alg, "ecdsa");
     }
+
+    #[test]
+    fn test_key_check_result() {
+        let result = KeyCheckResult {
+            status: "success".to_string(),
+            private_key_path: "/path/to/key".to_string(),
+            cert_pem_path: "/path/to/cert".to_string(),
+        };
+        assert_eq!(result.status, "success");
+        assert!(result.private_key_path.contains("key"));
+    }
 }
+
+// ============================================================================
+// Integration Examples - How to use handlers from CLI and Tauri
+// ============================================================================
+//
+// # CLI Integration Example (in main.rs run_cli):
+//
+//   "gen-key" => {
+//       let args = GenKeyArgs {
+//           email: email.to_string(),
+//           password: _password,
+//           bits: _bits,
+//           alg: alg,
+//           reuse_key: reuse,
+//       };
+//       match async_runtime::block_on(handle_gen_key(args, &state)) {
+//           Ok(result) => {
+//               println!("Generated key: {}", result.private_key_path);
+//               println!("Certificate: {}", result.cert_pem_path);
+//           }
+//           Err(e) => println!("Error: {}", e),
+//       }
+//   }
+//
+// # Tauri Integration Example (in main.rs Tauri command):
+//
+//   #[tauri::command]
+//   async fn ui_generate_user_keys_and_cert(
+//       args: GenerateArgs,
+//       state: State<'_, AppState>,
+//   ) -> Result<KeyCheckResult, String> {
+//       let handler_args = GenKeyArgs {
+//           email: args.email,
+//           password: args.password,
+//           bits: args.bits,
+//           alg: args.alg.unwrap_or_else(|| "ecdsa".to_string()),
+//           reuse_key: args.reuse_key,
+//       };
+//       handle_gen_key(handler_args, &state).await
+//   }
+//
