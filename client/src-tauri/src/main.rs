@@ -2,6 +2,7 @@
 
 // Declare library modules
 mod cli;
+mod http_server;
 
 use hex as hex_crate;
 use reqwest::StatusCode;
@@ -673,6 +674,35 @@ async fn connect_to_server(
         .map_err(|e| format!("Failed to send registration: {}", e))?;
 
     println!("Sent registration message");
+
+    // Start HTTP file server if directory is configured
+    {
+        let cfg = state.config.lock().unwrap().clone();
+        let file_root_dir = cfg.file_root_directory.clone();
+        if !file_root_dir.is_empty() {
+            // Use an available port (0 means OS will choose)
+            let http_port = 0u16;
+            let app_handle_clone = app_handle.clone();
+            tokio::spawn(async move {
+                match http_server::start_http_server(file_root_dir, http_port).await {
+                    Ok(port) => {
+                        println!("HTTP file server started on port {}", port);
+                        let _ = app_handle_clone.emit(
+                            "http-file-server-ready",
+                            serde_json::json!({ "port": port }),
+                        );
+                    }
+                    Err(e) => {
+                        println!("Failed to start HTTP file server: {}", e);
+                        let _ = app_handle_clone.emit(
+                            "http-file-server-error",
+                            serde_json::json!({ "error": e.to_string() }),
+                        );
+                    }
+                }
+            });
+        }
+    }
 
     // Create channel for sending messages
     let (tx, mut rx) = mpsc::channel::<Message>(100);
@@ -2245,7 +2275,7 @@ fn get_content_type(file_path: &str) -> &'static str {
 }
 
 #[tauri::command]
-async fn list_shareable_files() -> Result<serde_json::json::Value, String> {
+async fn list_shareable_files() -> Result<serde_json::Value, String> {
     // TODO: Implement file listing from a designated share directory
     // For now, return mock data
     Ok(serde_json::json!({
@@ -2259,7 +2289,7 @@ async fn list_shareable_files() -> Result<serde_json::json::Value, String> {
 }
 
 #[tauri::command]
-async fn get_shareable_file(path: String) -> Result<serde_json::json::Value, String> {
+async fn get_shareable_file(path: String) -> Result<serde_json::Value, String> {
     // Check if file extension is allowed
     if !is_file_allowed(&path) {
         return Err(format!("File type not allowed: {}", path));

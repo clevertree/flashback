@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 export interface RemoteHouseProps {
   clientIp: string;
@@ -20,43 +21,151 @@ export default function RemoteHouse({
   clientEmail,
   onClose,
 }: RemoteHouseProps) {
+  const [currentPath, setCurrentPath] = useState("/");
   const [files, setFiles] = useState<RemoteFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<RemoteFile | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [filePreviewType, setFilePreviewType] = useState<"text" | "image" | "video" | "none">("none");
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [httpServerPort, setHttpServerPort] = useState<number | null>(null);
 
   // Supported file extensions for viewing
   const SUPPORTED_EXTENSIONS = {
-    text: [".md", ".markdown", ".txt", ".css"],
-    image: [".jpg", ".jpeg", ".png", ".gif", ".webp"],
-    video: [".mp4", ".webm", ".mov", ".avi"],
-    audio: [".mp3", ".wav", ".m4a", ".flac"],
+    text: [".md", ".markdown", ".txt", ".css", ".json", ".js", ".ts", ".tsx", ".jsx"],
+    image: [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"],
+    video: [".mp4", ".webm", ".mov", ".avi", ".mkv"],
+    audio: [".mp3", ".wav", ".m4a", ".flac", ".aac"],
   };
 
+  // Listen for HTTP server ready event
   useEffect(() => {
-    fetchFileList();
-  }, [clientIp, clientPort]);
+    let unlistenHttpServer: UnlistenFn | null = null;
 
+    const setupListener = async () => {
+      try {
+        unlistenHttpServer = await listen<{ port: number }>(
+          "http-file-server-ready",
+          (event) => {
+            const port = event.payload.port;
+            console.log("HTTP file server ready on port:", port);
+            setHttpServerPort(port);
+          }
+        );
+      } catch (e) {
+        console.error("Failed to listen for http-file-server-ready:", e);
+      }
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlistenHttpServer) {
+        unlistenHttpServer();
+      }
+    };
+  }, []);
+
+  // Load index.md from root on component mount or when HTTP port changes
+  useEffect(() => {
+    if (httpServerPort) {
+      loadFile("index.md");
+    }
+  }, [httpServerPort]);
+
+  // Construct URL for file on HTTP server
+  function getFileUrl(filePath: string): string {
+    if (!httpServerPort) return "";
+    const normalizedPath = filePath.startsWith("/") ? filePath : `/${filePath}`;
+    return `http://127.0.0.1:${httpServerPort}${normalizedPath}`;
+  }
+
+  // Fetch file list from HTTP server
   async function fetchFileList() {
+    if (!httpServerPort) {
+      setError("HTTP server not ready");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setFiles([]);
+
     try {
-      const api: any = window.flashbackApi;
-      if (!api) {
-        throw new Error("API not available");
+      const pathForApi = currentPath === "/" ? "" : currentPath.slice(1);
+      const url = `http://127.0.0.1:${httpServerPort}/api/files${
+        pathForApi ? `/${pathForApi}` : ""
+      }`;
+
+      const response = await fetch(url);
+      if (response.ok) {
+        const fileList: RemoteFile[] = await response.json();
+        setFiles(fileList);
+      } else {
+        setError(`Failed to fetch files: ${response.status} ${response.statusText}`);
       }
-      // TODO: Call API to fetch files from remote client
-      // For now, use mock data to demonstrate the UI
-      setFiles([
-        { name: "README.md", type: "file", size: 2048 },
-        { name: "guide.md", type: "file", size: 4096 },
-        { name: "style.css", type: "file", size: 1024 },
-        { name: "photo.jpg", type: "file", size: 102400 },
-        { name: "video.mp4", type: "file", size: 5242880 },
-      ]);
+    } catch (e: any) {
+      setError(`Failed to fetch file list: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Load and display a file
+  async function loadFile(fileName: string) {
+    if (!httpServerPort) {
+      setError("HTTP server not ready");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSelectedFile(null);
+    setFileContent(null);
+    setFileUrl(null);
+    setFilePreviewType("none");
+
+    try {
+      const filePath = `${currentPath}${currentPath === "/" ? "" : "/"}${fileName}`.replace("//", "/");
+      const newPath = filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+      setCurrentPath(newPath);
+
+      const ext = fileName.substring(fileName.lastIndexOf(".")).toLowerCase();
+      const contentUrl = `http://127.0.0.1:${httpServerPort}/content${filePath}`;
+      const downloadUrl = `http://127.0.0.1:${httpServerPort}/download${filePath}`;
+
+      const newFile: RemoteFile = {
+        name: fileName,
+        type: "file",
+      };
+      setSelectedFile(newFile);
+
+      if (SUPPORTED_EXTENSIONS.text.includes(ext)) {
+        setFilePreviewType("text");
+        try {
+          const response = await fetch(contentUrl);
+          if (response.ok) {
+            const text = await response.text();
+            setFileContent(text);
+          } else {
+            setError(`Failed to load file: ${response.status} ${response.statusText}`);
+          }
+        } catch (e: any) {
+          setError(`Failed to fetch file: ${e.message}`);
+        }
+      } else if (SUPPORTED_EXTENSIONS.image.includes(ext)) {
+        setFilePreviewType("image");
+        setFileUrl(downloadUrl);
+      } else if (SUPPORTED_EXTENSIONS.video.includes(ext)) {
+        setFilePreviewType("video");
+        setFileUrl(downloadUrl);
+      } else if (SUPPORTED_EXTENSIONS.audio.includes(ext)) {
+        setFilePreviewType("video"); // Reuse video preview for audio
+        setFileUrl(downloadUrl);
+      } else {
+        setError("File type not supported for preview");
+      }
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -64,35 +173,32 @@ export default function RemoteHouse({
     }
   }
 
-  async function openFile(file: RemoteFile) {
-    setSelectedFile(file);
+  // Navigate to a directory
+  async function navigateToDirectory(dirName: string) {
+    const newPath = `${currentPath}${currentPath === "/" ? "" : "/"}${dirName}`.replace("//", "/");
+    setCurrentPath(newPath);
+    setSelectedFile(null);
     setFileContent(null);
     setFilePreviewType("none");
+  }
 
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-
-      // Determine file type
-      if (SUPPORTED_EXTENSIONS.text.includes(ext)) {
-        setFilePreviewType("text");
-        // TODO: Fetch text file content from remote
-        setFileContent(`# ${file.name}\n\nFile content preview (TODO: fetch from remote)`);
-      } else if (SUPPORTED_EXTENSIONS.image.includes(ext)) {
-        setFilePreviewType("image");
-        // TODO: Fetch image from remote
-      } else if (SUPPORTED_EXTENSIONS.video.includes(ext)) {
-        setFilePreviewType("video");
-        // TODO: Fetch video URL from remote
-      } else if (SUPPORTED_EXTENSIONS.audio.includes(ext)) {
-        setFilePreviewType("video"); // Reuse video preview for audio
-        // TODO: Fetch audio URL from remote
-      } else {
-        setError("File type not supported for preview");
-      }
-    } catch (e: any) {
-      setError(e?.message || String(e));
+  // Navigate up one directory
+  function navigateUp() {
+    if (currentPath !== "/") {
+      const newPath = currentPath.substring(0, currentPath.lastIndexOf("/")) || "/";
+      setCurrentPath(newPath);
+      setSelectedFile(null);
+      setFileContent(null);
+      setFilePreviewType("none");
     }
   }
+
+  // Fetch files when current path changes
+  useEffect(() => {
+    if (httpServerPort) {
+      fetchFileList();
+    }
+  }, [currentPath, httpServerPort]);
 
   function formatFileSize(bytes?: number): string {
     if (!bytes) return "";
@@ -104,13 +210,14 @@ export default function RemoteHouse({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-800 rounded-lg shadow-2xl w-full max-w-4xl h-4/5 flex flex-col">
+      <div className="bg-slate-800 rounded-lg shadow-2xl w-full max-w-6xl h-5/6 flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b border-slate-700">
           <div>
             <h2 className="text-2xl font-semibold text-white">Remote House</h2>
             <p className="text-sm text-gray-400">
               {clientEmail || `${clientIp}:${clientPort}`}
+              {currentPath !== "/" && ` - ${currentPath}`}
             </p>
           </div>
           <button
@@ -121,11 +228,29 @@ export default function RemoteHouse({
           </button>
         </div>
 
+        {/* Status Bar */}
+        {!httpServerPort && (
+          <div className="bg-yellow-900 text-yellow-200 px-4 py-2 text-sm">
+            ⚠️ HTTP file server not ready. Make sure fileRootDirectory is configured.
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex flex-1 overflow-hidden">
           {/* File List Panel */}
-          <div className="w-1/3 border-r border-slate-700 overflow-y-auto p-4">
-            <h3 className="text-lg font-medium mb-4 text-white">Files</h3>
+          <div className="w-1/3 border-r border-slate-700 overflow-y-auto p-4 flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-white">Files</h3>
+              {currentPath !== "/" && (
+                <button
+                  onClick={navigateUp}
+                  className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-white rounded"
+                  title="Go up one directory"
+                >
+                  ⬆️ Up
+                </button>
+              )}
+            </div>
 
             {loading && <div className="text-gray-400">Loading files...</div>}
             {error && <div className="text-red-500 text-sm">{error}</div>}
@@ -134,22 +259,33 @@ export default function RemoteHouse({
               <div className="text-gray-400 text-sm">No files available</div>
             )}
 
-            <div className="space-y-1">
+            <div className="space-y-1 flex-1">
               {files.map((file) => (
                 <button
                   key={file.name}
-                  onClick={() => openFile(file)}
+                  onClick={() => {
+                    if (file.type === "directory") {
+                      navigateToDirectory(file.name);
+                    } else {
+                      loadFile(file.name);
+                    }
+                  }}
                   className={`w-full text-left px-3 py-2 rounded transition-colors ${
                     selectedFile?.name === file.name
                       ? "bg-blue-600 text-white"
                       : "hover:bg-slate-700 text-gray-200"
                   }`}
                 >
-                  <div className="flex justify-between items-center">
-                    <span className="font-mono text-sm truncate">{file.name}</span>
-                    <span className="text-xs text-gray-400 ml-2">
-                      {formatFileSize(file.size)}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-sm truncate">
+                      {file.type === "directory" ? "📁 " : "📄 "}
+                      {file.name}
                     </span>
+                    {file.type === "file" && (
+                      <span className="text-xs text-gray-400 ml-2 whitespace-nowrap">
+                        {formatFileSize(file.size)}
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -166,17 +302,23 @@ export default function RemoteHouse({
 
           {/* File Preview Panel */}
           <div className="w-2/3 overflow-auto p-4">
-            {!selectedFile && (
+            {!selectedFile && !httpServerPort && (
+              <div className="text-gray-400 text-center py-12">
+                HTTP server not ready. Please check your configuration.
+              </div>
+            )}
+
+            {!selectedFile && httpServerPort && (
               <div className="text-gray-400 text-center py-12">
                 Select a file to preview
               </div>
             )}
 
             {selectedFile && filePreviewType === "text" && (
-              <div>
+              <div className="flex flex-col h-full">
                 <h4 className="text-lg font-medium mb-4 text-white">{selectedFile.name}</h4>
                 {fileContent ? (
-                  <pre className="bg-slate-900 p-4 rounded overflow-auto text-gray-300 text-sm">
+                  <pre className="bg-slate-900 p-4 rounded overflow-auto text-gray-300 text-sm flex-1">
                     <code>{fileContent}</code>
                   </pre>
                 ) : (
@@ -186,21 +328,37 @@ export default function RemoteHouse({
             )}
 
             {selectedFile && filePreviewType === "image" && (
-              <div>
+              <div className="flex flex-col h-full">
                 <h4 className="text-lg font-medium mb-4 text-white">{selectedFile.name}</h4>
-                <div className="bg-slate-900 rounded p-4 flex items-center justify-center">
-                  {/* TODO: Load image from remote */}
-                  <div className="text-gray-400">Image preview (TODO: load from remote)</div>
+                <div className="bg-slate-900 rounded p-4 flex items-center justify-center flex-1">
+                  {fileUrl ? (
+                    <img
+                      src={fileUrl}
+                      alt={selectedFile.name}
+                      className="max-w-full max-h-full object-contain"
+                      onError={() => setError("Failed to load image")}
+                    />
+                  ) : (
+                    <div className="text-gray-400">Loading image...</div>
+                  )}
                 </div>
               </div>
             )}
 
             {selectedFile && filePreviewType === "video" && (
-              <div>
+              <div className="flex flex-col h-full">
                 <h4 className="text-lg font-medium mb-4 text-white">{selectedFile.name}</h4>
-                <div className="bg-slate-900 rounded p-4">
-                  {/* TODO: Embed video player */}
-                  <div className="text-gray-400">Media player (TODO: implement)</div>
+                <div className="bg-slate-900 rounded p-4 flex-1 flex items-center justify-center">
+                  {fileUrl ? (
+                    <video
+                      src={fileUrl}
+                      controls
+                      className="max-w-full max-h-full"
+                      onError={() => setError("Failed to load media")}
+                    />
+                  ) : (
+                    <div className="text-gray-400">Loading media...</div>
+                  )}
                 </div>
               </div>
             )}

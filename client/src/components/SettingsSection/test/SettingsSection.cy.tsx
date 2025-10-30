@@ -7,10 +7,12 @@ describe('SettingsSection Component', () => {
     autoPlayMedia: false,
     connectOnStartup: false,
     autoReconnectPeers: false,
+    fileRootDirectory: '',
     onChangeNavSide: cy.stub().as('onChangeNavSide'),
     onToggleAutoPlay: cy.stub().as('onToggleAutoPlay'),
     onToggleConnectOnStartup: cy.stub().as('onToggleConnectOnStartup'),
     onToggleAutoReconnectPeers: cy.stub().as('onToggleAutoReconnectPeers'),
+    onChangeFileRootDirectory: cy.stub().as('onChangeFileRootDirectory'),
   };
 
   it('renders settings section with title', () => {
@@ -179,10 +181,12 @@ describe('SettingsSection Component', () => {
         autoPlayMedia: true,
         connectOnStartup: true,
         autoReconnectPeers: true,
+        fileRootDirectory: '/shared',
         onChangeNavSide: cy.stub(),
         onToggleAutoPlay: cy.stub(),
         onToggleConnectOnStartup: cy.stub(),
         onToggleAutoReconnectPeers: cy.stub(),
+        onChangeFileRootDirectory: cy.stub(),
       };
       cy.mount(<SettingsSection {...allEnabledProps} />);
       
