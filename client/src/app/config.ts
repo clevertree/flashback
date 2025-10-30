@@ -13,6 +13,8 @@ export interface AppConfig {
     showHistoricClients: boolean
     // Determines the optional path for private key, certificate, and other secure files
     privateKeyPath?: string
+    // Root directory path for hosting files via HTTPS to other clients
+    fileRootDirectory?: string
     // Window state persisted from Tauri window-state plugin
     winX?: number
     winY?: number

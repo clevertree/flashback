@@ -6,10 +6,12 @@ export interface SettingsSectionProps {
     autoPlayMedia: boolean
     connectOnStartup: boolean
     autoReconnectPeers: boolean
+    fileRootDirectory?: string
     onChangeNavSide: (side: NavSide) => void
     onToggleAutoPlay: (val: boolean) => void
     onToggleConnectOnStartup: (val: boolean) => void
     onToggleAutoReconnectPeers: (val: boolean) => void
+    onChangeFileRootDirectory: (path: string) => void
 }
 
 export default function SettingsSection({
@@ -17,10 +19,12 @@ export default function SettingsSection({
                                             autoPlayMedia,
                                             connectOnStartup,
                                             autoReconnectPeers,
+                                            fileRootDirectory,
                                             onChangeNavSide,
                                             onToggleAutoPlay,
                                             onToggleConnectOnStartup,
-                                            onToggleAutoReconnectPeers
+                                            onToggleAutoReconnectPeers,
+                                            onChangeFileRootDirectory
                                         }: SettingsSectionProps) {
     return (
         <section id="settings" className="bg-gray-800 rounded-lg p-6 shadow-lg mt-8">
@@ -65,6 +69,25 @@ export default function SettingsSection({
                                    onChange={(e) => onToggleAutoReconnectPeers(e.target.checked)} />
                             Auto re-connect to known peers
                         </label>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 className="text-lg font-medium mb-2 text-gray-200">File Hosting</h3>
+                    <div className="flex flex-col gap-2">
+                        <label className="text-sm text-gray-300">
+                            Root Directory for File Sharing
+                        </label>
+                        <input
+                            type="text"
+                            value={fileRootDirectory || ''}
+                            onChange={(e) => onChangeFileRootDirectory(e.target.value)}
+                            placeholder="/path/to/shared/files"
+                            className="px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="text-xs text-gray-400">
+                            Set the directory path where files will be hosted to other clients via HTTPS. This is a local setting used by the HTTP file serving listener.
+                        </p>
                     </div>
                 </div>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 import React, {useEffect, useMemo, useState} from "react";
-import {getConfig} from "../config";
+import {getConfig, setConfig} from "../config";
 import {RegisterResultData} from "../../apiTypes";
 
 export interface BroadcastSectionProps {
@@ -11,6 +11,7 @@ export default function BroadcastSection({registeredInfo}: BroadcastSectionProps
     const cfg = useMemo(() => getConfig(), []);
     const [visible, setVisible] = useState(!!registeredInfo);
     const [broadcastPort, setBroadcastPort] = useState<number>(13337);
+    const [fileRootDirectory, setFileRootDirectory] = useState<string>(cfg.fileRootDirectory || '');
     const [localIP, setLocalIP] = useState<string>("127.0.0.1");
     const [remoteIP, setRemoteIP] = useState<string>(registeredInfo?.clientIP ? registeredInfo.clientIP : "");
     const [busy, setBusy] = useState(false);
@@ -69,7 +70,16 @@ export default function BroadcastSection({registeredInfo}: BroadcastSectionProps
                     <label className="flex flex-col">
                         <span className="text-gray-600">Broadcast Port</span>
                         <input className="border px-3 py-2 rounded" value={broadcastPort}
-                               onChange={(e) => setBroadcastPort(e.target.value)} placeholder="13337"/>
+                               onChange={(e) => setBroadcastPort(parseInt(e.target.value, 10) || 13337)} placeholder="13337"/>
+                    </label>
+                    <label className="flex flex-col">
+                        <span className="text-gray-600">File Root Directory</span>
+                        <input className="border px-3 py-2 rounded" value={fileRootDirectory}
+                               onChange={(e) => {
+                                   setFileRootDirectory(e.target.value);
+                                   setConfig({fileRootDirectory: e.target.value});
+                               }} placeholder="/path/to/shared/files"/>
+                        <span className="text-xs text-gray-500 mt-1">Directory containing files to serve via HTTPS to other clients</span>
                     </label>
                     <div>
                         <button className="px-3 py-2 border rounded disabled:opacity-50"

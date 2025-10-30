@@ -155,6 +155,9 @@ struct RuntimeConfig {
     // User email identifier parsed from certificate
     #[serde(default)]
     email: String,
+    // Root directory path for hosting files via HTTPS to other clients
+    #[serde(default)]
+    file_root_directory: String,
 }
 
 fn default_app_data_dir_fallback() -> std::path::PathBuf {
@@ -196,6 +199,7 @@ impl Default for RuntimeConfig {
             certificate_path: cert.to_string_lossy().to_string(),
             base_url: default_base_url(),
             email: String::new(),
+            file_root_directory: String::new(),
         }
     }
 }
