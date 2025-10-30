@@ -95,7 +95,7 @@ TS=$(date +%Y%m%d%H%M%S)
 EMAIL_A="testA+${TS}@test.com"
 EMAIL_B="testB+${TS}@test.com"
 
-# Start clients with CLI and startup flags (no server connection needed)
+# Start clients with CLI mode flag
 log "Starting client A (CLI)..."
 WDIO_LOGS_DIR="wdio-logs/.log" CLIENT_DEBUG=1 "$CLIENT_BIN" --cli <"$A_IN" >"$A_LOG" 2>&1 &
 CLIENT_A_PID=$!

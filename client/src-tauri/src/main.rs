@@ -1,5 +1,8 @@
 // Keep Windows console visible (do not hide in release) to support CLI mode
 
+// Declare library modules
+mod cli;
+
 use hex as hex_crate;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -1617,8 +1620,12 @@ fn main() {
         print_cli_help();
         return;
     }
+    // Generate context once for both CLI and GUI modes
+    let context = tauri::generate_context!();
+    
     if args.iter().any(|a| a == "--cli") {
         // CLI mode: Build a minimal Tauri App so we can reuse the same command functions and state
+        // We build with a dummy context but don't run it - instead we manually drive the CLI loop
         let app = tauri::Builder::default()
             .manage(app_state)
             .invoke_handler(tauri::generate_handler![
@@ -1640,7 +1647,7 @@ fn main() {
                 ui_load_private_key,
                 ui_generate_user_keys_and_cert
             ])
-            .build(tauri::generate_context!())
+            .build(context)
             .expect("failed to build tauri app for CLI mode");
         {
             let st: tauri::State<AppState> = app.state::<AppState>();
@@ -1757,7 +1764,7 @@ fn main() {
             ui_generate_user_keys_and_cert,
             api_register_json
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 
