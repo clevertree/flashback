@@ -3,6 +3,7 @@
 // by both the Tauri GUI application and the standalone CLI binary
 
 pub mod cli;
+pub mod handlers;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
