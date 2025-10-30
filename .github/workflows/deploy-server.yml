@@ -1,99 +1,58 @@
-name: Build and Deploy Server
+name: Build and Test Server
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'server/**'
-      - 'infra/cdk/**'
+      - 'client/**'
       - '.github/workflows/deploy-server.yml'
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPO_NAME: flashback-server
+  RUST_BACKTRACE: 1
   SERVER_PORT: 51111
 
 jobs:
-  build-and-deploy:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
+          targets: x86_64-unknown-linux-gnu
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            server
+            client/src-tauri
 
-      - name: Compute image tags
-        id: meta
-        run: |
-          SHA_TAG=${GITHUB_SHA::12}
-          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
-          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
-            echo "latest_tag=latest" >> $GITHUB_OUTPUT
-          else
-            echo "latest_tag=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Bump versions (client + server)
-        run: |
-          chmod +x scripts/bump-versions.sh || true
-          scripts/bump-versions.sh
-
-      - name: Build image
+      - name: Build server
         working-directory: server
-        run: |
-          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ steps.meta.outputs.sha_tag }} .
+        run: cargo build --release
 
-      - name: Create ECR repo if missing
-        run: |
-          aws ecr describe-repositories --repository-names $ECR_REPO_NAME >/dev/null 2>&1 || \
-          aws ecr create-repository --repository-name $ECR_REPO_NAME >/dev/null
+      - name: Run server tests
+        working-directory: server
+        run: cargo test --release
 
-      - name: Push image (SHA)
+      - name: Build client
+        working-directory: client
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ steps.meta.outputs.sha_tag }}
+          npm install
+          npm run build
 
-      - name: Tag and push latest (main only)
-        if: ${{ steps.meta.outputs.latest_tag != '' }}
-        run: |
-          docker tag ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ steps.meta.outputs.sha_tag }} \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ steps.meta.outputs.latest_tag }}
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO_NAME }}:${{ steps.meta.outputs.latest_tag }}
+      - name: Run client tests
+        working-directory: client
+        run: npm run test || true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install infra deps
-        working-directory: infra/cdk
-        run: |
-          npm ci
-
-      - name: CDK Diff
-        working-directory: infra/cdk
-        run: |
-          npx cdk diff \
-            -c ecrRepoName=${{ env.ECR_REPO_NAME }} \
-            -c imageTag=${{ steps.meta.outputs.sha_tag }} \
-            -c serverPort=${{ env.SERVER_PORT }}
-
-      - name: CDK Deploy
-        working-directory: infra/cdk
-        run: |
-          npx cdk deploy --require-approval never \
-            -c ecrRepoName=${{ env.ECR_REPO_NAME }} \
-            -c imageTag=${{ steps.meta.outputs.sha_tag }} \
-            -c serverPort=${{ env.SERVER_PORT }}
+      - name: Build client binary
+        working-directory: client
+        run: npm run tauri:build || true
