@@ -19,17 +19,17 @@
 
 ## The Three Things to Build
 
-### 1️⃣ Relay Tracker Backend (6-10 days)
-**What:** 5 API endpoints + database  
+### 1️⃣ Relay Tracker Backend (6-8 days)
+**What:** 4 API endpoints + database  
 **Where:** `/server/app/api/relay/`  
 **How:**
-- Register clients (store certificates)
-- Accept broadcast ready (mutual TLS)
+- Register clients (store certificates) - NO AUTH
+- Accept broadcast ready (mutual TLS) - port + addresses
 - Lookup peers by email (mutual TLS)
 - List all peers (mutual TLS)
-- Heartbeat keep-alive (mutual TLS)
+- Auto-cleanup every 5 min (no heartbeat endpoint!)
 
-**Key:** Mutual TLS, expiration management
+**Key:** Mutual TLS, expiration management, cleanup job
 
 ---
 
@@ -51,12 +51,12 @@
 **Where:** `client/src-tauri/src/` + `client/src/components/`  
 **How:**
 - Register with Relay on startup
-- Send port + addresses every 30 min
+- Broadcast ready (once) to Relay
 - Query Relay for peers
 - Try addresses in order (NAT traversal)
 - Show peer status in UI
 
-**Key:** Mutual TLS client, heartbeat loop
+**Note:** Heartbeat is CLIENT-TO-CLIENT (Phase 2B), not to Relay
 
 ---
 
@@ -85,19 +85,20 @@
 ## Phase 2 Timeline
 
 ```
-Week 1: Relay Backend (Days 1-7)
-  ✓ Database setup
-  ✓ Register endpoint
-  ✓ Broadcast endpoints (mutual TLS)
-  ✓ Heartbeat + cleanup
-  ✓ Tests for all endpoints
+Week 1: Relay Backend (Days 1-6)
+  ✓ Database setup (Day 1)
+  ✓ Register endpoint (Day 2)
+  ✓ Broadcast ready endpoint + mutual TLS (Day 3)
+  ✓ Broadcast lookup endpoint (Day 4)
+  ✓ Broadcast list endpoint (Day 5)
+  ✓ Cleanup job + TLS testing (Days 6-8)
 
 Week 2: Client Certs + Server (Days 8-14)
   ✓ Generate certificate (rcgen)
   ✓ Bind to 0.0.0.0
   ✓ Gather local IPs
   ✓ Register with Relay
-  ✓ Heartbeat loop
+  ✓ Send address list to Relay
 
 Week 3: Discovery (Days 15-21)
   ✓ Query Relay from Tauri
@@ -106,7 +107,7 @@ Week 3: Discovery (Days 15-21)
   ✓ Status indicators
   ✓ E2E test setup
 
-Week 4-5: Polish (Days 22-35)
+Week 4: Polish (Days 22-30)
   ✓ Error handling
   ✓ Network resilience
   ✓ Performance tuning
@@ -131,18 +132,15 @@ POST /api/relay/broadcast/ready
 
 GET /api/relay/broadcast/lookup?email=user@example.com
   Input: Query parameter
-  Output: {email, port, addresses, last_seen}
+  Output: {email, port, addresses}
   Auth: Mutual TLS ✓
 
 GET /api/relay/broadcast/list
   Input: None
-  Output: [{email, port, addresses, last_seen}, ...]
+  Output: [{email, port, addresses}, ...]
   Auth: Mutual TLS ✓
 
-POST /api/relay/broadcast/heartbeat
-  Input: None
-  Output: {broadcast_id, expires_in}
-  Auth: Mutual TLS ✓
+NO HEARTBEAT ENDPOINT (client-to-client keepalive, Phase 2B+)
 ```
 
 ---

@@ -63,7 +63,7 @@
 - [ ] Extract client certificate from TLS
 - [ ] Query `broadcasts` table by email
 - [ ] Check expiration (return 404 if expired)
-- [ ] Return `{email, port, addresses, last_seen, expires_in}`
+- [ ] Return `{email, port, addresses}`
 - [ ] Return 404 if not found or expired
 - [ ] Handle TLS validation
 - [ ] Write tests for all paths
@@ -72,25 +72,18 @@
 - [ ] Create `/server/app/api/relay/broadcast/list/route.ts`
 - [ ] Extract client certificate from TLS
 - [ ] Query all non-expired broadcasts
+- [ ] Filter out self (don't return caller)
 - [ ] Return array of peers
 - [ ] Handle empty list (return `[]`)
 - [ ] Write tests
 
-### Heartbeat Endpoint (2.1.5)
-- [ ] Create `/server/app/api/relay/broadcast/heartbeat/route.ts`
-- [ ] Extract client certificate from TLS
-- [ ] Find matching broadcast by email
-- [ ] Extend expiration (add 3600 seconds)
-- [ ] Return 200 with new `expires_in`
-- [ ] Return 404 if broadcast not found
-- [ ] Write tests
-
-### Expiration Management (2.1.6)
+### Expiration Management (2.1.5)
 - [ ] Create background job: Clean expired broadcasts
 - [ ] Run every 5 minutes
 - [ ] Delete broadcasts where `expires_at < NOW()`
 - [ ] Log cleanup statistics
 - [ ] Handle errors gracefully
+- [ ] Note: NO heartbeat endpoint (client-to-client only)
 
 ### TLS/mTLS Configuration (2.1 Support)
 - [ ] Install Node.js TLS libraries (`tls`, `https`)
@@ -101,14 +94,14 @@
 - [ ] Create test certificates (self-signed)
 
 ### Tests (2.1 Support)
-- [ ] Integration tests for all 5 endpoints
+- [ ] Integration tests for all 4 endpoints (no heartbeat)
 - [ ] Certificate validation tests
 - [ ] Expiration tests
 - [ ] Database cleanup tests
 - [ ] Error handling tests
 - [ ] Generate test certificates
 
-**Estimated Effort:** 6-10 days
+**Estimated Effort:** 6-8 days
 
 ---
 
@@ -256,36 +249,20 @@ async fn broadcast_ready(
 }
 ```
 
-### Heartbeat Loop (2.3.4)
-- [ ] Create background task in Tauri
-- [ ] Send heartbeat every 30 minutes
-- [ ] POST to `{relay_url}/api/relay/broadcast/heartbeat`
-- [ ] Include client certificate
-- [ ] Handle response: extend expiration
-- [ ] On failure: Log error, retry next cycle
-- [ ] Graceful shutdown on app exit
+### Note on Heartbeat (2.3.4)
 
-**Pseudo-code:**
-```rust
-tokio::spawn(async move {
-  let mut interval = tokio::time::interval(
-    Duration::from_secs(30 * 60)
-  );
-  
-  loop {
-    interval.tick().await;
-    if let Err(e) = send_heartbeat().await {
-      eprintln!("Heartbeat failed: {}", e);
-    }
-  }
-});
-```
+**IMPORTANT:** Heartbeat is NOT sent to Relay Tracker in Phase 2A.
+
+- Broadcasts stay alive via 1-hour TTL
+- Background cleanup deletes expired broadcasts
+- Client goes offline → broadcast expires naturally
+- Heartbeat is PHASE 2B+ (client-to-client keepalive)
+- Phase 2B will add peer-to-peer health checks
 
 ### Error Handling & Logging (2.3 Support)
 - [ ] Log certificate generation
 - [ ] Log relay registration success/failure
 - [ ] Log broadcast ready success/failure
-- [ ] Log heartbeat attempts
 - [ ] Emit events to UI for user feedback
 - [ ] Handle network timeouts gracefully
 
@@ -487,16 +464,17 @@ async function connectToPeer(peer: Peer): Promise<string> {
 
 Phase 2 is complete when:
 
-1. ✅ User A registers certificate with relay
-2. ✅ User A broadcasts port + addresses
-3. ✅ User B queries relay
 4. ✅ User B receives User A's address list
 5. ✅ User B tries addresses in order
 6. ✅ User B successfully connects to User A
 7. ✅ User B browses User A's files
-8. ✅ Heartbeat keeps broadcast active
-9. ✅ After 1 hour without heartbeat, peer goes offline
+8. ✅ Broadcasts expire automatically after 1 hour
+9. ✅ Cleanup job runs every 5 minutes
 10. ✅ All tested end-to-end with 2 real instances
 
-**Sign-off:** When all 10 criteria met and tests pass
+**Note on Heartbeat:** Client-to-client heartbeat added in Phase 2B. Phase 2A uses TTL-based expiration.
+
+**Sign-off:** When all 9 criteria met and tests pass
+
+```
 

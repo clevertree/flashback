@@ -98,6 +98,175 @@ All subsequent API calls on this connection:
 
 ---
 
+### **Recommendation: Option A (Mutual TLS)**
+
+For `broadcast/ready` and `broadcast/lookup` APIs, use **Mutual TLS** because:
+1. ✅ Simple to implement (TLS built into HTTP clients)
+2. ✅ Stateless (no tokens to manage)
+3. ✅ Secure by default
+4. ✅ Email extraction from certificate
+5. ✅ Eliminates token management complexity
+
+---
+
+## What is Mutual TLS? (Deep Dive)
+
+### Regular TLS (HTTPS)
+```
+Client connects to server:
+  1. Client: "Hi server, prove who you are"
+  2. Server: "Here's my certificate" (public key + identity)
+  3. Client: Verifies certificate is trusted
+  4. Client: Sends secret data encrypted with server's public key
+  5. Connection established ✓
+
+Result: Only server is authenticated
+         Client is anonymous
+```
+
+**Example:** When you visit `https://example.com`, the browser verifies the server's certificate but the server doesn't verify you are who you claim to be.
+
+---
+
+### Mutual TLS (mTLS)
+```
+Client connects to server:
+  1. Client: "Hi server, I'll prove who I am too"
+  2. Client sends: "Here's MY certificate" (public key + identity)
+  3. Server: "Verified, I trust you"
+  4. Server sends: "Here's MY certificate" (public key + identity)
+  5. Client: "Verified, I trust you"
+  6. Connection established ✓
+
+Result: BOTH client AND server are authenticated
+        Both prove identity cryptographically
+```
+
+**Key difference:** The server (Relay Tracker) asks for and verifies the client's certificate before allowing the connection.
+
+---
+
+### How Mutual TLS Works for Relay Tracker
+
+```
+Phase 1: Client Registration (no auth)
+  POST /api/relay/register
+  Body: {
+    "certificate": "-----BEGIN CERTIFICATE-----\n...",
+    "email": "user@example.com"
+  }
+  → Server stores certificate in database
+  → Server returns 200 OK
+
+Phase 2: Client Wants to Query Relay (with mutual TLS)
+  GET /api/relay/broadcast/lookup?email=peer@example.com
+
+  Step A: TLS Handshake (mutual)
+    Client: "Here's my certificate (from registration)"
+    Server: "Verified! I found it in database"
+    Connection is now authenticated
+    
+  Step B: HTTP Request
+    GET /api/relay/broadcast/lookup?email=peer@example.com
+    (Server already knows who sent this because TLS authenticated the client)
+    
+  Step C: Server Processes
+    Server extracts email from client certificate: "user@example.com"
+    Server queries database: "Find peer@example.com"
+    Server returns peer details (port + addresses)
+    
+Result: No tokens needed, no auth headers needed
+        TLS session proves client identity
+```
+
+---
+
+### Code Example: Node.js Mutual TLS
+
+**Setting up the server (Relay Tracker):**
+```typescript
+import https from 'https';
+import fs from 'fs';
+import express from 'express';
+
+const app = express();
+
+const options = {
+  key: fs.readFileSync('/path/to/server.key'),       // Server's private key
+  cert: fs.readFileSync('/path/to/server.crt'),      // Server's certificate
+  requestCert: true,                                   // Ask client for certificate
+  rejectUnauthorized: false,                           // Accept all (validate in app)
+  ca: []                                               // Optional: list of trusted CAs
+};
+
+// Create HTTPS server with mutual TLS
+const server = https.createServer(options, app);
+
+app.post('/api/relay/broadcast/ready', (req, res) => {
+  // Extract client certificate from TLS handshake
+  const clientCert = req.socket.getPeerCertificate();
+  
+  if (!clientCert || clientCert.subject.CN) {
+    return res.status(401).json({error: "No client certificate"});
+  }
+  
+  // Extract email from certificate CN (Common Name)
+  const email = clientCert.subject.CN;  // e.g., "user@example.com"
+  
+  // Verify certificate is registered in database
+  const registeredCert = db.query(
+    "SELECT * FROM clients WHERE email = $1",
+    [email]
+  );
+  
+  if (!registeredCert || registeredCert.certificate !== clientCert.raw) {
+    return res.status(401).json({error: "Certificate not registered"});
+  }
+  
+  // ✅ Certificate is valid and registered
+  // Process the broadcast request
+  const {port, addresses} = req.body;
+  
+  // Insert broadcast
+  db.query(
+    "INSERT INTO broadcasts (...) VALUES (...)",
+    [email, port, addresses]
+  );
+  
+  return res.json({status: "ok", broadcast_id: "..."});
+});
+
+server.listen(3000);
+```
+
+**Client side (using curl with certificates):**
+```bash
+# Register (no cert required)
+curl -X POST https://localhost:3000/api/relay/register \
+  --cacert server.crt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "certificate": "<PEM cert from earlier>"
+  }'
+
+# Query relay (WITH client cert - mutual TLS)
+curl -X GET \
+  https://localhost:3000/api/relay/broadcast/lookup?email=peer@example.com \
+  --cacert server.crt \                    # Trust server's certificate
+  --cert client.crt \                      # Send my certificate
+  --key client.key                         # Sign with my private key
+```
+
+**What happens:**
+1. curl sends client certificate (--cert) and key (--key)
+2. Server verifies the certificate is registered
+3. Server extracts email from certificate CN
+4. Server processes the request as authenticated
+5. Response is returned
+
+---
+
 #### Option B: JWT Tokens (Alternative)
 ```
 1. During TLS handshake (mutual TLS):
@@ -149,19 +318,6 @@ Relay validates:
 
 ---
 
-### **Recommendation: Option A (Mutual TLS)**
-
-For `broadcast/ready` and `broadcast/lookup` APIs, use **Mutual TLS** because:
-1. ✅ Simple to implement (TLS built into HTTP clients)
-2. ✅ Stateless (no tokens to manage)
-3. ✅ Secure by default
-4. ✅ Email extraction from certificate
-5. ✅ Eliminates token management complexity
-
-If mutual TLS is difficult for your client stack, use **Option C (Message Signing)** as fallback.
-
----
-
 ## Part 2: Relay Tracker API Endpoints
 
 ### Client Registration (No Auth Required)
@@ -188,7 +344,7 @@ Response 409:
 ### Broadcast Ready (Mutual TLS Auth Required)
 ```
 POST /api/relay/broadcast/ready
-Headers: TLS client certificate
+Headers: TLS mutual authentication
 Body: {
   "port": 54321,
   "addresses": [
@@ -259,15 +415,34 @@ Response 200:
 ]
 ```
 
-### Heartbeat/Keep-Alive (Mutual TLS Auth Required)
-```
-POST /api/relay/broadcast/heartbeat
-Headers: TLS client certificate
-Body: {}
+---
 
-Response 200:
-{
-  "status": "ok",
+## Important: Heartbeat is CLIENT-TO-CLIENT, NOT Relay
+
+**❌ DO NOT build:** `POST /api/relay/broadcast/heartbeat` endpoint
+
+**✅ WHY:** 
+- Heartbeat happens between peer clients (P2P keepalive)
+- NOT to the Relay Tracker
+- Relay uses TTL expiration instead (1 hour, auto-cleanup)
+
+**How broadcasts stay alive:**
+```
+Client A wants to stay discoverable:
+  1. Connects to Relay → broadcasts port + addresses
+  2. Relay stores broadcast with expires_at = NOW() + 1 hour
+  3. If Client A goes offline → broadcast expires naturally
+  4. Cleanup job deletes expired broadcasts every 5 minutes
+
+Direct peer heartbeat (Phase 2B):
+  - Client A ↔ Client B exchange keepalives
+  - NOT sent to Relay Tracker
+  - Implemented in Peer Server HTTP endpoints
+```
+
+---
+
+## Part 5: Network Architecture
   "expires_in": 3600
 }
 ```
@@ -418,9 +593,10 @@ Peer: Serve files from fileRootDirectory
 - ✅ Client registration endpoint
 - ✅ Broadcast ready endpoint (mutual TLS)
 - ✅ Broadcast lookup endpoint (mutual TLS)
-- ✅ Heartbeat endpoint
 - ✅ List peers endpoint
 - ✅ Certificate storage
+- ✅ Background cleanup (expiration)
+- ⚠️ NO heartbeat endpoint (heartbeat is client-to-client)
 
 **Phase 2 is NOT complete without Relay Tracker** - it's a prerequisite for clients to find each other.
 
@@ -487,8 +663,8 @@ Peer: Serve files from fileRootDirectory
    - [ ] Certificate storage
    - [ ] Broadcast ready (mutual TLS)
    - [ ] Broadcast lookup (mutual TLS)
-   - [ ] Heartbeat management
-   - [ ] Broadcast expiration
+   - [ ] List peers endpoint
+   - [ ] Broadcast expiration + cleanup
 
 2. **Client Updates** (Rust/Tauri)
    - [ ] Generate self-signed certificate
@@ -503,6 +679,8 @@ Peer: Serve files from fileRootDirectory
    - [ ] Try addresses in order (local first)
    - [ ] Fall back to next address on failure
    - [ ] Show peer availability status
+
+**Note:** Heartbeat is implemented later (Phase 2B) as peer-to-peer keepalive, NOT in Relay Tracker.
 
 ---
 
