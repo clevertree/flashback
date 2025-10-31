@@ -2,11 +2,10 @@ import React, { useEffect, useState } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 export interface RemoteHouseProps {
+  friendEmail: string;
   clientIp: string;
   clientPort: number;
-  clientEmail?: string;
-  publicCertificate?: string; // Must come from relay tracker server only
-  repositoryName?: string; // Optional: if set, browse specific repository on client
+  publicCertificate: string; // Must come from relay tracker server only
   onClose?: () => void;
 }
 
@@ -18,11 +17,10 @@ export interface RemoteFile {
 }
 
 export default function RemoteHouse({
+  friendEmail,
   clientIp,
   clientPort,
-  clientEmail,
   publicCertificate,
-  repositoryName,
   onClose,
 }: RemoteHouseProps) {
   const [currentPath, setCurrentPath] = useState("/");
@@ -219,11 +217,10 @@ export default function RemoteHouse({
         <div className="flex justify-between items-center p-4 border-b border-slate-700">
           <div>
             <h2 className="text-2xl font-semibold text-white">
-              Remote House{repositoryName && ` - ${repositoryName}`}
+              Friend Connection - {friendEmail}
             </h2>
             <p className="text-sm text-gray-400">
-              {clientEmail || `${clientIp}:${clientPort}`}
-              {currentPath !== "/" && ` - ${currentPath}`}
+              Shared files from {friendEmail} ({clientIp}:{clientPort})
             </p>
           </div>
           <button

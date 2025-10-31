@@ -5,6 +5,7 @@ import ServerSection from "../components/ServerSection/ServerSection";
 import FriendsListSection from "../components/FriendsListSection/FriendsListSection";
 import SettingsSection from "../components/SettingsSection/SettingsSection";
 import RemoteHouse from "../components/RemoteHouse/RemoteHouse";
+import RepoBrowser from "../components/RepoBrowser/RepoBrowser";
 import {getConfig, setConfig} from "./config";
 import "../integration/flashbackCryptoBridge";
 import {RegisterResultData, ClientInfo} from "../apiTypes";
@@ -16,6 +17,7 @@ export default function Home() {
     const [keyVerified, setKeyVerified] = useState(false);
     const [registeredInfo, setRegisteredInfo] = useState<RegisterResultData | null>(null);
     const [selectedClient, setSelectedClient] = useState<ClientInfo | null>(null);
+    const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
 
     // Persist window state on move/resize and try to restore on load (plugin handles auto-restore)
@@ -79,19 +81,27 @@ export default function Home() {
                 </button>
             </div>
             
-            {/* Show RemoteHouse when a client is selected */}
-            {selectedClient && (
+            {/* Show RemoteHouse when a friend is selected for connection */}
+            {selectedClient && selectedClient.publicCertificate && (
                 <RemoteHouse
+                    friendEmail={selectedClient.email || 'Unknown'}
                     clientIp={selectedClient.remote_ip || selectedClient.ip || ''}
                     clientPort={selectedClient.port || 0}
-                    clientEmail={selectedClient.email}
                     publicCertificate={selectedClient.publicCertificate}
                     onClose={() => setSelectedClient(null)}
                 />
             )}
+
+            {/* Show RepoBrowser when a channel is selected for browsing */}
+            {selectedChannel && (
+                <RepoBrowser
+                    channelName={selectedChannel}
+                    onClose={() => setSelectedChannel(null)}
+                />
+            )}
             
-            {/* Hide main sections when RemoteHouse is open */}
-            {!selectedClient && (
+            {/* Hide main sections when RemoteHouse or RepoBrowser is open */}
+            {!selectedClient && !selectedChannel && (
                 <>
                     {/* Section 1: Generate or Locate Private Key */}
                     <KeySection defaultConfigPath={defaultCertPath || ''}
@@ -106,7 +116,27 @@ export default function Home() {
                         registeredInfo={registeredInfo}
                         onFriendVisit={(friend) => setSelectedClient(friend)}
                     />
-                    {/* Section 4: Settings */}
+                    {/* Section 4: Repository Browser */}
+                    {registeredInfo && (
+                        <section className="mb-6">
+                            <h2 className="text-lg font-medium mb-4">4. Browse Repositories</h2>
+                            <p className="text-sm text-gray-400 mb-4">
+                                Click on a channel below to browse entries and comments from the Hyperledger Fabric network.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3 max-w-4xl">
+                                {['movies', 'tv-shows', 'documentaries', 'anime', 'tutorials'].map((channel) => (
+                                    <button
+                                        key={channel}
+                                        onClick={() => setSelectedChannel(channel)}
+                                        className="p-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg font-semibold transition-colors"
+                                    >
+                                        📚 {channel}
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+                    {/* Section 5: Settings */}
                     {showSettings && (
                         <SettingsSection
                             navSide={defaults.navSide}

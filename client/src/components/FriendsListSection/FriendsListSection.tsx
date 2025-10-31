@@ -66,6 +66,8 @@ export default function FriendsListSection({ registeredInfo, onFriendVisit }: Fr
                 peer_status: 'online',
             };
             
+            // Note: RemoteHouse is for connecting to friend servers only
+            // For browsing repositories, use RepoBrowser with Fabric channels
             if (onFriendVisit) {
                 onFriendVisit(updatedFriend);
             }

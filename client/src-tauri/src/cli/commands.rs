@@ -47,9 +47,31 @@ pub enum CliCommand {
     Allow,
     Deny,
     Help2,
-    LibClone {
-        repo_name: String,
-        git_url: String,
+    // Fabric commands
+    FabricQueryEntries {
+        channel: String,
+        query: Option<String>,
+    },
+    FabricQueryComments {
+        channel: String,
+        entry_id: String,
+    },
+    FabricGetChannels,
+    FabricSubscribeChannel {
+        channel: String,
+    },
+    FabricUnsubscribeChannel {
+        channel: String,
+    },
+    FabricAddEntry {
+        channel: String,
+        title: String,
+        description: Option<String>,
+    },
+    FabricAddComment {
+        channel: String,
+        entry_id: String,
+        content: String,
     },
 }
 
@@ -142,13 +164,50 @@ impl CliCommand {
                 }
             }
             "deny" => Some(CliCommand::Deny),
-            "lib" => {
+            "fabric" => {
                 let subcommand = parts.next()?;
                 match subcommand {
-                    "clone" => {
-                        let repo_name = parts.next()?.to_string();
-                        let git_url = parts.next()?.to_string();
-                        Some(CliCommand::LibClone { repo_name, git_url })
+                    "query-entries" => {
+                        let channel = parts.next()?.to_string();
+                        let query = parts.next().map(|s| s.to_string());
+                        Some(CliCommand::FabricQueryEntries { channel, query })
+                    }
+                    "query-comments" => {
+                        let channel = parts.next()?.to_string();
+                        let entry_id = parts.next()?.to_string();
+                        Some(CliCommand::FabricQueryComments { channel, entry_id })
+                    }
+                    "get-channels" => Some(CliCommand::FabricGetChannels),
+                    "subscribe" => {
+                        let channel = parts.next()?.to_string();
+                        Some(CliCommand::FabricSubscribeChannel { channel })
+                    }
+                    "unsubscribe" => {
+                        let channel = parts.next()?.to_string();
+                        Some(CliCommand::FabricUnsubscribeChannel { channel })
+                    }
+                    "add-entry" => {
+                        let channel = parts.next()?.to_string();
+                        let title = parts.next()?.to_string();
+                        let description = parts.next().map(|s| s.to_string());
+                        Some(CliCommand::FabricAddEntry {
+                            channel,
+                            title,
+                            description,
+                        })
+                    }
+                    "add-comment" => {
+                        let channel = parts.next()?.to_string();
+                        let entry_id = parts.next()?.to_string();
+                        let content = parts.collect::<Vec<_>>().join(" ");
+                        if content.is_empty() {
+                            return None;
+                        }
+                        Some(CliCommand::FabricAddComment {
+                            channel,
+                            entry_id,
+                            content,
+                        })
                     }
                     _ => None,
                 }
@@ -176,7 +235,13 @@ impl CliCommand {
             CliCommand::Allow => "Allow a pending request",
             CliCommand::Deny => "Deny a pending request",
             CliCommand::Help2 => "Show help message",
-            CliCommand::LibClone { .. } => "Clone a git repository to the local repository directory",
+            CliCommand::FabricQueryEntries { .. } => "Query entries from Fabric channel",
+            CliCommand::FabricQueryComments { .. } => "Query comments for an entry",
+            CliCommand::FabricGetChannels => "Get list of available Fabric channels",
+            CliCommand::FabricSubscribeChannel { .. } => "Subscribe to a Fabric channel",
+            CliCommand::FabricUnsubscribeChannel { .. } => "Unsubscribe from a Fabric channel",
+            CliCommand::FabricAddEntry { .. } => "Add an entry to a Fabric channel",
+            CliCommand::FabricAddComment { .. } => "Add a comment to an entry",
         }
     }
 }
