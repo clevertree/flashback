@@ -1,8 +1,8 @@
 "use client";
 import React, { useEffect, useMemo, useState } from "react";
-import { getConfig } from "../config";
+import { getConfig } from "../../app/config";
 import { RegisterResultData } from "../../apiTypes";
-import ClientsList from "../../components/ClientsList/ClientsList";
+import ClientsList from "../ClientsList/ClientsList";
 
 export interface ClientsListSectionProps {
     registeredInfo: RegisterResultData | null;

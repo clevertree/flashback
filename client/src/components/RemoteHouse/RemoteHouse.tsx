@@ -5,6 +5,7 @@ export interface RemoteHouseProps {
   clientIp: string;
   clientPort: number;
   clientEmail?: string;
+  publicCertificate?: string; // Must come from relay tracker server only
   onClose?: () => void;
 }
 
@@ -19,6 +20,7 @@ export default function RemoteHouse({
   clientIp,
   clientPort,
   clientEmail,
+  publicCertificate,
   onClose,
 }: RemoteHouseProps) {
   const [currentPath, setCurrentPath] = useState("/");

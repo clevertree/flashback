@@ -1,6 +1,6 @@
 "use client";
 import React, {useEffect, useMemo, useState} from "react";
-import {getConfig, setConfig} from "../config";
+import {getConfig, setConfig} from "../../app/config";
 import {RegisterResultData} from "../../apiTypes";
 
 export interface ServerSectionProps {

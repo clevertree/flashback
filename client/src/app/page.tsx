@@ -1,21 +1,13 @@
 "use client";
 import React, {useEffect, useState} from 'react';
-import KeySection from "./sections/KeySection";
-import ServerSection from "./sections/ServerSection";
-import ClientsListSection from "./sections/ClientsListSection";
+import KeySection from "../components/KeySection/KeySection";
+import ServerSection from "../components/ServerSection/ServerSection";
+import FriendsListSection from "../components/FriendsListSection/FriendsListSection";
 import SettingsSection from "../components/SettingsSection/SettingsSection";
 import RemoteHouse from "../components/RemoteHouse/RemoteHouse";
 import {getConfig, setConfig} from "./config";
 import "../integration/flashbackCryptoBridge";
-import {RegisterResultData} from "../apiTypes";
-
-interface ClientInfo {
-    ip: string;
-    port: number;
-    remote_ip?: string;
-    local_ip?: string;
-    peer_status?: string;
-}
+import {RegisterResultData, ClientInfo} from "../apiTypes";
 
 export default function Home() {
     const defaults = getConfig();
@@ -90,8 +82,10 @@ export default function Home() {
             {/* Show RemoteHouse when a client is selected */}
             {selectedClient && (
                 <RemoteHouse
-                    clientIp={selectedClient.remote_ip || selectedClient.ip}
-                    clientPort={selectedClient.port}
+                    clientIp={selectedClient.remote_ip || selectedClient.ip || ''}
+                    clientPort={selectedClient.port || 0}
+                    clientEmail={selectedClient.email}
+                    publicCertificate={selectedClient.publicCertificate}
                     onClose={() => setSelectedClient(null)}
                 />
             )}
@@ -107,10 +101,10 @@ export default function Home() {
                     <ServerSection
                         keyVerified={keyVerified}
                         onRegistered={(info) => setRegisteredInfo(info)}/>
-                    {/* Section 3: Connected Clients (shown after registration) */}
-                    <ClientsListSection
+                    {/* Section 3: Friends List (shown after registration) */}
+                    <FriendsListSection
                         registeredInfo={registeredInfo}
-                        onClientVisit={(client) => setSelectedClient(client)}
+                        onFriendVisit={(friend) => setSelectedClient(friend)}
                     />
                     {/* Section 4: Settings */}
                     {showSettings && (
