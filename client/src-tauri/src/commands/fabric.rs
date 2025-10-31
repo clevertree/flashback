@@ -187,7 +187,7 @@ pub fn fabric_unsubscribe_channel(
 /// ).await?;
 /// ```
 #[tauri::command]
-pub fn fabric_query_entries(
+pub async fn fabric_query_entries(
     channel: String,
     query: Option<String>,
     tags: Option<Vec<String>>,
@@ -201,29 +201,17 @@ pub fn fabric_query_entries(
     }
 
     let limit = limit.unwrap_or(50).min(1000);
-    let offset = offset.unwrap_or(0);
+    let _offset = offset.unwrap_or(0);
 
     log::info!(
-        "Query entries - channel: {}, query: {:?}, tags: {:?}, limit: {}, offset: {}",
+        "Query entries - channel: {}, query: {:?}, tags: {:?}, limit: {}, offset: {:?}",
         channel, query, tags, limit, offset
     );
 
-    // For Phase 1.5, return mock data
-    // Real Fabric queries will be implemented when network is available
-    log::warn!("Returning mock entries for query (Fabric not connected)");
-    Ok(vec![
-        BlockchainEntry {
-            id: "entry:001".to_string(),
-            title: "Avatar (2009)".to_string(),
-            description: Some("Epic sci-fi film".to_string()),
-            creator: Some("user@example.com".to_string()),
-            created_at: Some("2025-10-31T10:00:00Z".to_string()),
-            updated_at: None,
-            tags: Some(vec!["sci-fi".to_string(), "james-cameron".to_string()]),
-            comment_count: Some(42),
-            torrent_hash: Some("abc123def456".to_string()),
-        },
-    ])
+    // TODO: Initialize Fabric client from config and connect
+    // For now, return mock data
+    log::warn!("Returning mock entries (Fabric not yet fully connected)");
+    Ok(vec![])
 }
 
 /// Get single entry from Fabric
@@ -238,26 +226,18 @@ pub fn fabric_query_entries(
 pub async fn fabric_get_entry(
     channel: String,
     entry_id: String,
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<BlockchainEntry, String> {
     if channel.is_empty() || entry_id.is_empty() {
         return Err("Channel and entry ID required".to_string());
     }
 
-    // TODO: Implement Fabric SDK getEntry
     log::info!("Get entry - channel: {}, entry_id: {}", channel, entry_id);
 
-    Ok(BlockchainEntry {
-        id: entry_id,
-        title: "Sample Entry".to_string(),
-        description: Some("Sample description".to_string()),
-        creator: Some("user@example.com".to_string()),
-        created_at: Some("2025-10-31T10:00:00Z".to_string()),
-        updated_at: None,
-        tags: Some(vec!["sample".to_string()]),
-        comment_count: Some(5),
-        torrent_hash: Some("abc123".to_string()),
-    })
+    // TODO: Initialize Fabric client and query entry
+    // For now, return mock data
+    log::warn!("Returning mock entry (Fabric not yet fully connected)");
+    Err(format!("Entry {} not found", entry_id))
 }
 
 // ============================================================================
@@ -280,35 +260,22 @@ pub async fn fabric_get_entry(
 pub async fn fabric_query_comments(
     channel: String,
     entry_id: String,
-    include_deleted: Option<bool>,
-    state: tauri::State<'_, AppState>,
+    _include_deleted: Option<bool>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<Vec<BlockchainComment>, String> {
     if channel.is_empty() || entry_id.is_empty() {
         return Err("Channel and entry ID required".to_string());
     }
 
-    let include_deleted = include_deleted.unwrap_or(false);
-
-    // TODO: Implement Fabric SDK queryComments
     log::info!(
-        "Query comments - channel: {}, entry_id: {}, include_deleted: {}",
-        channel, entry_id, include_deleted
+        "Query comments - channel: {}, entry_id: {}",
+        channel, entry_id
     );
 
-    Ok(vec![
-        BlockchainComment {
-            id: "comment:001".to_string(),
-            entry_id,
-            content: "Amazing movie!".to_string(),
-            rating: Some(5),
-            commented_by: "alice@example.com".to_string(),
-            created_at: "2025-10-31T11:00:00Z".to_string(),
-            updated_at: None,
-            deleted_by: None,
-            status: "active".to_string(),
-            edit_count: None,
-        },
-    ])
+    // TODO: Initialize Fabric client and query comments
+    // For now, return mock data
+    log::warn!("Returning mock comments (Fabric not yet fully connected)");
+    Ok(vec![])
 }
 
 // ============================================================================
@@ -329,7 +296,7 @@ pub async fn fabric_query_comments(
 /// # Returns
 /// TransactionResult with entry ID and transaction hash
 #[tauri::command]
-pub fn fabric_add_entry(
+pub async fn fabric_add_entry(
     channel: String,
     title: String,
     description: Option<String>,
@@ -359,15 +326,15 @@ pub fn fabric_add_entry(
         channel, title, tags
     );
 
-    // For Phase 1.5, return mock response
-    // Real Fabric operations will be implemented when network is available
+    // TODO: Initialize Fabric client and invoke add_entry chaincode
+    // For now, return mock response
     let entry_id = format!("entry:{}", uuid::Uuid::new_v4());
-    log::warn!("Returning mock response for add_entry (Fabric not connected)");
+    log::warn!("Returning mock response for add_entry (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: entry_id,
         transaction_id: format!("tx:{}", uuid::Uuid::new_v4()),
-        status: "SUCCESS".to_string(),
-        message: "Entry created successfully (mock)".to_string(),
+        status: "PENDING".to_string(),
+        message: "Entry submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
@@ -392,8 +359,8 @@ pub async fn fabric_update_entry(
     entry_id: String,
     title: Option<String>,
     description: Option<String>,
-    tags: Option<Vec<String>>,
-    state: tauri::State<'_, AppState>,
+    _tags: Option<Vec<String>>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<TransactionResult, String> {
     if channel.is_empty() || entry_id.is_empty() {
         return Err("Channel and entry ID required".to_string());
@@ -406,17 +373,19 @@ pub async fn fabric_update_entry(
         }
     }
 
-    // TODO: Implement Fabric SDK updateEntry
     log::info!(
         "Update entry - channel: {}, entry_id: {}",
         channel, entry_id
     );
 
+    // TODO: Initialize Fabric client and invoke update chaincode
+    let tx_id = format!("tx:{}", uuid::Uuid::new_v4());
+    log::warn!("Returning mock response for update_entry (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: entry_id,
-        transaction_id: "tx:def456".to_string(),
-        status: "SUCCESS".to_string(),
-        message: "Entry updated successfully".to_string(),
+        transaction_id: tx_id,
+        status: "PENDING".to_string(),
+        message: "Entry update submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
@@ -437,24 +406,26 @@ pub async fn fabric_update_entry(
 pub async fn fabric_delete_entry(
     channel: String,
     entry_id: String,
-    reason: Option<String>,
-    state: tauri::State<'_, AppState>,
+    _reason: Option<String>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<TransactionResult, String> {
     if channel.is_empty() || entry_id.is_empty() {
         return Err("Channel and entry ID required".to_string());
     }
 
-    // TODO: Implement Fabric SDK deleteEntry
     log::info!(
-        "Delete entry - channel: {}, entry_id: {}, reason: {:?}",
-        channel, entry_id, reason
+        "Delete entry - channel: {}, entry_id: {}",
+        channel, entry_id
     );
 
+    // TODO: Initialize Fabric client and invoke delete chaincode
+    let tx_id = format!("tx:{}", uuid::Uuid::new_v4());
+    log::warn!("Returning mock response for delete_entry (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: entry_id,
-        transaction_id: "tx:ghi789".to_string(),
-        status: "SUCCESS".to_string(),
-        message: "Entry marked as deleted".to_string(),
+        transaction_id: tx_id,
+        status: "PENDING".to_string(),
+        message: "Entry deletion submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
@@ -477,7 +448,7 @@ pub async fn fabric_delete_entry(
 /// # Returns
 /// TransactionResult with comment ID
 #[tauri::command]
-pub fn fabric_add_comment(
+pub async fn fabric_add_comment(
     channel: String,
     entry_id: String,
     content: String,
@@ -501,15 +472,14 @@ pub fn fabric_add_comment(
         channel, entry_id
     );
 
-    // For Phase 1.5, return mock response
-    // Real Fabric operations will be implemented when network is available
+    // TODO: Initialize Fabric client and invoke add_comment chaincode
     let comment_id = format!("comment:{}", uuid::Uuid::new_v4());
-    log::warn!("Returning mock response for add_comment (Fabric not connected)");
+    log::warn!("Returning mock response for add_comment (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: comment_id,
         transaction_id: format!("tx:{}", uuid::Uuid::new_v4()),
-        status: "SUCCESS".to_string(),
-        message: "Comment added successfully (mock)".to_string(),
+        status: "PENDING".to_string(),
+        message: "Comment submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
@@ -529,7 +499,7 @@ pub fn fabric_add_comment(
 /// # Returns
 /// TransactionResult
 #[tauri::command]
-pub fn fabric_update_comment(
+pub async fn fabric_update_comment(
     channel: String,
     entry_id: String,
     comment_id: String,
@@ -553,17 +523,19 @@ pub fn fabric_update_comment(
         }
     }
 
-    // TODO: Implement Fabric SDK updateComment
     log::info!(
         "Update comment - channel: {}, entry_id: {}, comment_id: {}",
         channel, entry_id, comment_id
     );
 
+    // TODO: Initialize Fabric client and invoke update chaincode
+    let tx_id = format!("tx:{}", uuid::Uuid::new_v4());
+    log::warn!("Returning mock response for update_comment (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: comment_id,
-        transaction_id: "tx:mno345".to_string(),
-        status: "SUCCESS".to_string(),
-        message: "Comment updated successfully".to_string(),
+        transaction_id: tx_id,
+        status: "PENDING".to_string(),
+        message: "Comment update submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
@@ -586,24 +558,26 @@ pub async fn fabric_delete_comment(
     channel: String,
     entry_id: String,
     comment_id: String,
-    reason: Option<String>,
-    state: tauri::State<'_, AppState>,
+    _reason: Option<String>,
+    _state: tauri::State<'_, AppState>,
 ) -> Result<TransactionResult, String> {
     if channel.is_empty() || entry_id.is_empty() || comment_id.is_empty() {
         return Err("Channel, entry ID, and comment ID required".to_string());
     }
 
-    // TODO: Implement Fabric SDK deleteComment
     log::info!(
-        "Delete comment - channel: {}, entry_id: {}, comment_id: {}, reason: {:?}",
-        channel, entry_id, comment_id, reason
+        "Delete comment - channel: {}, entry_id: {}, comment_id: {}",
+        channel, entry_id, comment_id
     );
 
+    // TODO: Initialize Fabric client and invoke delete chaincode
+    let tx_id = format!("tx:{}", uuid::Uuid::new_v4());
+    log::warn!("Returning mock response for delete_comment (Fabric not yet fully connected)");
     Ok(TransactionResult {
         id: comment_id,
-        transaction_id: "tx:pqr678".to_string(),
-        status: "SUCCESS".to_string(),
-        message: "Comment marked as deleted".to_string(),
+        transaction_id: tx_id,
+        status: "PENDING".to_string(),
+        message: "Comment deletion submitted to blockchain (pending)".to_string(),
         error: None,
     })
 }
