@@ -4,3 +4,4 @@ peer-port-*.txt
 *.
 wdio-logs
 .vercel
+.env*.local
