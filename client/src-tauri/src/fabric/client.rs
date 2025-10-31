@@ -106,21 +106,22 @@ impl FabricClient {
         log::info!("Connecting to Fabric network: {}", self.config.org_name);
 
         // Load and parse certificate
-        let cert_info = CertificateManager::get_email_from_file(&self.config.cert_path)
-            .map(|email| CertificateInfo {
-                email,
-                common_name: None,
-                organization: Some(self.config.org_name.clone()),
-                pem: String::new(),
-                fingerprint: String::new(),
-            })?;
+        let pem = std::fs::read_to_string(&self.config.cert_path)
+            .map_err(|e| FabricError::CertificateError(format!("Failed to read certificate: {}", e)))?;
 
-        log::info!("Loaded certificate for: {}", cert_info.email);
+        let cert_info = CertificateManager::parse_certificate(&pem)?;
+
+        log::info!(
+            "Loaded certificate for: {} (cn: {:?}, org: {:?})",
+            cert_info.email,
+            cert_info.common_name,
+            cert_info.organization
+        );
 
         let mut cert_lock = self.certificate.write().await;
         *cert_lock = Some(cert_info);
 
-        log::info!("Connected to Fabric network");
+        log::info!("Connected to Fabric network successfully");
         Ok(())
     }
 

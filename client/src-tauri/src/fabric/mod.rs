@@ -20,6 +20,6 @@ pub mod client;
 pub mod certificate;
 pub mod errors;
 
-pub use client::FabricClient;
+pub use client::{FabricClient, FabricConfig};
 pub use certificate::CertificateManager;
 pub use errors::{FabricError, FabricResult};

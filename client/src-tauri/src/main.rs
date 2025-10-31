@@ -2167,6 +2167,7 @@ async fn api_ready(
     localIP: Option<String>,
     remoteIP: Option<String>,
     broadcastPort: Option<u16>,
+    repo_names: Option<Vec<String>>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
@@ -2180,6 +2181,23 @@ async fn api_ready(
         }
     };
     let cfg_cur = state.config.lock().unwrap().clone();
+
+    // Validate repositories if provided
+    if let Some(ref repo_list) = repo_names {
+        let file_root = &cfg_cur.file_root_directory;
+        let repos_dir = std::path::PathBuf::from(file_root).join("repos");
+        
+        for repo_name in repo_list {
+            let repo_path = repos_dir.join(repo_name);
+            if !repo_path.exists() {
+                return Err(format!("Repository '{}' not found locally at {:?}", repo_name, repo_path));
+            }
+            if !repo_path.is_dir() {
+                return Err(format!("Repository '{}' exists but is not a directory", repo_name));
+            }
+            log::info!("Validated repository: {}", repo_name);
+        }
+    }
 
     // Ensure peer listener is started and configured
     let need_start = { state.self_info.lock().unwrap().is_none() };
@@ -2224,7 +2242,14 @@ async fn api_ready(
     if email_val.trim().is_empty() {
         return Err("Email is not set in config. Please generate keys (username) first.".to_string());
     }
-    let body = serde_json::json!({"email": email_val, "socket_address": sock});
+    
+    let mut body = serde_json::json!({"email": email_val, "socket_address": sock});
+    
+    // Add repository list to broadcast if provided
+    if let Some(repos) = repo_names {
+        body["repositories"] = serde_json::json!(repos);
+    }
+    
     let (status, json) = http_post_json(&url, body).await?;
     if status == StatusCode::OK || status == StatusCode::CREATED {
         Ok(format!(
@@ -2390,9 +2415,11 @@ async fn api_clone_repository(
     use std::process::Command;
     
     let cfg = state.config.lock().unwrap();
-    let file_root = cfg.file_root_directory.as_ref().and_then(|d| {
-        if d.trim().is_empty() { None } else { Some(d.clone()) }
-    }).ok_or("fileRootDirectory not configured")?;
+    
+    if cfg.file_root_directory.trim().is_empty() {
+        return Err("fileRootDirectory not configured".to_string());
+    }
+    let file_root = cfg.file_root_directory.clone();
     
     let repos_dir = std::path::PathBuf::from(&file_root).join("repos");
     std::fs::create_dir_all(&repos_dir)
@@ -3054,7 +3081,7 @@ fn run_cli(app: tauri::App) {
                     } else {
                         (None, None)
                     };
-                let fut = api_ready(local_ip_opt, None, port_opt, st, app_handle.clone());
+                let fut = api_ready(local_ip_opt, None, port_opt, None, st, app_handle.clone());
                 match async_runtime::block_on(fut) {
                     Ok(m) => println!("{}", m),
                     Err(e) => println!("Error: {}", e),
