@@ -3,13 +3,13 @@
 /// This module provides Tauri commands that interface with Hyperledger Fabric
 /// for querying entries, comments, and managing channel subscriptions.
 ///
-/// Phase 1 Implementation: Core Fabric API Bridge
+/// Phase 1.5 Implementation: Fabric SDK Integration
 /// 
 /// Architecture:
-/// React UI → Tauri Command Bridge → Fabric Node.js SDK → Fabric Network
-///
+/// React UI → Tauri Command Bridge → Fabric Client → gRPC → Fabric Network
 
 use crate::AppState;
+use crate::fabric::{FabricClient, FabricConfig};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -121,10 +121,30 @@ pub async fn fabric_subscribe_channel(
         return Err("Invalid channel name".to_string());
     }
 
-    // TODO: Implement Fabric SDK channel join
-    // For now, return success
-    log::info!("Subscribing to channel: {}", channel);
-    Ok(format!("SUBSCRIBED OK {}", channel))
+    // Initialize Fabric client if not already done
+    let mut fabric_lock = state.fabric_client.lock().unwrap();
+    if fabric_lock.is_none() {
+        let config = FabricConfig::default();
+        let client = FabricClient::new(config);
+        // TODO: Connect to Fabric network here (will do in real integration)
+        *fabric_lock = Some(client);
+    }
+
+    // Get mutable reference to client
+    if let Some(client) = fabric_lock.as_ref() {
+        match client.join_channel(&channel).await {
+            Ok(_) => {
+                log::info!("Successfully subscribed to channel: {}", channel);
+                Ok(format!("SUBSCRIBED OK {}", channel))
+            }
+            Err(e) => {
+                log::error!("Failed to subscribe to channel {}: {}", channel, e);
+                Err(e.to_string())
+            }
+        }
+    } else {
+        Err("Failed to initialize Fabric client".to_string())
+    }
 }
 
 /// Unsubscribe from a Fabric channel
@@ -143,9 +163,21 @@ pub async fn fabric_unsubscribe_channel(
         return Err("Invalid channel name".to_string());
     }
 
-    // TODO: Implement Fabric SDK channel leave
-    log::info!("Unsubscribing from channel: {}", channel);
-    Ok(format!("UNSUBSCRIBED OK {}", channel))
+    let fabric_lock = state.fabric_client.lock().unwrap();
+    if let Some(client) = fabric_lock.as_ref() {
+        match client.leave_channel(&channel).await {
+            Ok(_) => {
+                log::info!("Successfully unsubscribed from channel: {}", channel);
+                Ok(format!("UNSUBSCRIBED OK {}", channel))
+            }
+            Err(e) => {
+                log::error!("Failed to unsubscribe from channel {}: {}", channel, e);
+                Err(e.to_string())
+            }
+        }
+    } else {
+        Err("Fabric client not initialized".to_string())
+    }
 }
 
 // ============================================================================

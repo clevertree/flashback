@@ -3,6 +3,7 @@
 // Declare library modules
 mod cli;
 mod commands;
+mod fabric;
 mod http_server;
 
 use hex as hex_crate;
@@ -223,6 +224,9 @@ struct AppState {
     pending_request: Arc<Mutex<Option<PendingRequest>>>,
     // Runtime config persisted to disk
     config: Arc<Mutex<RuntimeConfig>>,
+    // Fabric client for blockchain operations (Phase 1.5+)
+    #[allow(dead_code)]
+    fabric_client: Arc<Mutex<Option<fabric::FabricClient>>>,
 }
 
 #[tauri::command]
@@ -1646,6 +1650,7 @@ fn main() {
         allowed_peers: Arc::new(Mutex::new(std::collections::HashSet::new())),
         pending_request: Arc::new(Mutex::new(None)),
         config: Arc::new(Mutex::new(initial_cfg)),
+        fabric_client: Arc::new(Mutex::new(None)),
     };
 
     let args: Vec<String> = std::env::args().collect();
