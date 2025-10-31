@@ -47,6 +47,10 @@ pub enum CliCommand {
     Allow,
     Deny,
     Help2,
+    LibClone {
+        repo_name: String,
+        git_url: String,
+    },
 }
 
 impl CliCommand {
@@ -138,6 +142,17 @@ impl CliCommand {
                 }
             }
             "deny" => Some(CliCommand::Deny),
+            "lib" => {
+                let subcommand = parts.next()?;
+                match subcommand {
+                    "clone" => {
+                        let repo_name = parts.next()?.to_string();
+                        let git_url = parts.next()?.to_string();
+                        Some(CliCommand::LibClone { repo_name, git_url })
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -161,6 +176,7 @@ impl CliCommand {
             CliCommand::Allow => "Allow a pending request",
             CliCommand::Deny => "Deny a pending request",
             CliCommand::Help2 => "Show help message",
+            CliCommand::LibClone { .. } => "Clone a git repository to the local repository directory",
         }
     }
 }

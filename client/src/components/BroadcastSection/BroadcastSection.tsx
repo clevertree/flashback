@@ -1,7 +1,7 @@
 "use client";
 import React, {useEffect, useMemo, useState} from "react";
 import {getConfig, setConfig} from "../../app/config";
-import {RegisterResultData} from "../../apiTypes";
+import {RegisterResultData, RepositorySummary} from "../../apiTypes";
 
 export interface BroadcastSectionProps {
     registeredInfo: RegisterResultData | null;
@@ -17,14 +17,79 @@ export default function BroadcastSection({registeredInfo}: BroadcastSectionProps
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [online, setOnline] = useState(false);
+    const [availableRepositories, setAvailableRepositories] = useState<RepositorySummary[]>([]);
+    const [hostedRepositories, setHostedRepositories] = useState<Set<string>>(new Set());
+    const [loadingRepos, setLoadingRepos] = useState(false);
 
     useEffect(() => {
         setVisible(!!registeredInfo);
         if (registeredInfo) {
             // Pre-fill remote socket using clientIP (port can be edited by user)
             setRemoteIP(`${registeredInfo.clientIP}:0`);
+            // Load available repositories from relay tracker
+            loadAvailableRepositories();
         }
     }, [registeredInfo]);
+
+    async function loadAvailableRepositories() {
+        setLoadingRepos(true);
+        try {
+            const api: any = window.flashbackApi;
+            if (api && typeof api.apiGetRepositories === 'function') {
+                const result = await api.apiGetRepositories();
+                let repos: RepositorySummary[] = [];
+                if (typeof result === 'string') {
+                    repos = JSON.parse(result);
+                } else if (Array.isArray(result)) {
+                    repos = result;
+                }
+                setAvailableRepositories(repos);
+            }
+        } catch (e: any) {
+            console.error('Failed to load repositories:', e?.message);
+        } finally {
+            setLoadingRepos(false);
+        }
+    }
+
+    async function toggleRepository(repoName: string) {
+        const isHosting = hostedRepositories.has(repoName);
+        
+        if (!isHosting) {
+            // Enable hosting - clone repository
+            try {
+                const api: any = window.flashbackApi;
+                if (!api || typeof api.apiCloneRepository !== 'function') {
+                    throw new Error('API bridge unavailable for cloning');
+                }
+                
+                // Find the repository to get its git_url
+                const repo = availableRepositories.find(r => r.name === repoName);
+                if (!repo) {
+                    throw new Error(`Repository ${repoName} not found in available repositories`);
+                }
+                
+                // For now, use apiCloneRepository with only repo name
+                // TODO: Update apiCloneRepository to accept git_url parameter
+                const result = await api.apiCloneRepository(repoName);
+                if (result && typeof result === 'string' && result.includes('success')) {
+                    // Add to hosted repositories
+                    const newRepos = new Set(hostedRepositories);
+                    newRepos.add(repoName);
+                    setHostedRepositories(newRepos);
+                } else {
+                    setError(`Failed to clone repository: ${repoName}`);
+                }
+            } catch (e: any) {
+                setError(e?.message || String(e));
+            }
+        } else {
+            // Disable hosting - remove from local
+            const newRepos = new Set(hostedRepositories);
+            newRepos.delete(repoName);
+            setHostedRepositories(newRepos);
+        }
+    }
 
     async function goReady() {
         setError(null);
@@ -32,7 +97,10 @@ export default function BroadcastSection({registeredInfo}: BroadcastSectionProps
         try {
             const api: any = window.flashbackApi;
             if (!api || typeof api.apiReady !== 'function') throw new Error('API bridge unavailable');
-            const res: string = await api.apiReady(localIP, remoteIP, broadcastPort);
+            
+            // Pass list of hosted repositories along with broadcast info
+            const repoNames = Array.from(hostedRepositories);
+            const res: string = await api.apiReady(localIP, remoteIP, broadcastPort, repoNames);
             if (/^READY OK /.test(res)) {
                 setOnline(true);
             } else {
@@ -72,6 +140,29 @@ export default function BroadcastSection({registeredInfo}: BroadcastSectionProps
                         <input className="border px-3 py-2 rounded" value={broadcastPort}
                                onChange={(e) => setBroadcastPort(parseInt(e.target.value, 10) || 13337)} placeholder="13337"/>
                     </label>
+                    <div className="flex flex-col">
+                        <span className="text-gray-600">Hosted Repositories</span>
+                        {loadingRepos && <span className="text-xs text-gray-500">Loading repositories...</span>}
+                        {!loadingRepos && availableRepositories.length === 0 && (
+                            <span className="text-xs text-gray-500">No repositories available</span>
+                        )}
+                        {!loadingRepos && availableRepositories.length > 0 && (
+                            <div className="space-y-1 mt-2">
+                                {availableRepositories.map((repo) => (
+                                    <label key={repo.name} className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={hostedRepositories.has(repo.name)}
+                                            onChange={() => toggleRepository(repo.name)}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm">{repo.name}</span>
+                                        {repo.description && <span className="text-xs text-gray-500">({repo.description})</span>}
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <label className="flex flex-col">
                         <span className="text-gray-600">File Root Directory</span>
                         <input className="border px-3 py-2 rounded" value={fileRootDirectory}

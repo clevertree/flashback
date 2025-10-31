@@ -64,12 +64,26 @@ if (typeof window !== 'undefined') {
                         const res = await invoke('api_get_clients', {}) as { status: number; clients: any[] }
                         return res
                     },
-                    apiReady: async (localIP: string, remoteIP: string, broadcastPort: number) => {
+                    apiGetRepositories: async () => {
+                        const res = await invoke('api_get_repositories', {}) as string
+                        return res
+                    },
+                    apiReady: async (localIP: string, remoteIP: string, broadcastPort: number, repoNames?: string[]) => {
                         const res = await invoke('api_ready', {localIP, remoteIP, broadcastPort}) as string
                         return res
                     },
                     apiLookup: async (email: string, minutes?: number) => {
                         const res = await invoke('api_lookup', {email, minutes}) as string
+                        return res
+                    },
+                    apiCloneRepository: async (repoName: string, gitUrl?: string) => {
+                        // If only one param, treat it as repo name and try to resolve git URL from relay tracker
+                        let url = gitUrl
+                        if (!url) {
+                            // TODO: Fetch git_url from relay tracker's /api/repository/list endpoint
+                            throw new Error('Git URL required for cloning')
+                        }
+                        const res = await invoke('api_clone_repository', {repo_name: repoName, git_url: url}) as string
                         return res
                     }
                 }

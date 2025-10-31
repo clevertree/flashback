@@ -1678,8 +1678,10 @@ fn main() {
                 api_register,
                 api_register_json,
                 api_get_clients,
+                api_get_repositories,
                 api_ready,
                 api_lookup,
+                api_clone_repository,
                 list_shareable_files,
                 get_shareable_file,
                 ui_load_private_key,
@@ -1798,8 +1800,10 @@ fn main() {
             api_register,
             api_register_json,
             api_get_clients,
+            api_get_repositories,
             api_ready,
             api_lookup,
+            api_clone_repository,
             list_shareable_files,
             get_shareable_file,
             ui_load_private_key,
@@ -2343,6 +2347,82 @@ async fn api_lookup(
     } else {
         Ok(format!("LOOKUP ERROR {} {}", status.as_u16(), json))
     }
+}
+
+#[tauri::command]
+async fn api_clone_repository(
+    repo_name: String,
+    git_url: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use std::process::Command;
+    
+    let cfg = state.config.lock().unwrap();
+    let file_root = cfg.file_root_directory.as_ref().and_then(|d| {
+        if d.trim().is_empty() { None } else { Some(d.clone()) }
+    }).ok_or("fileRootDirectory not configured")?;
+    
+    let repos_dir = std::path::PathBuf::from(&file_root).join("repos");
+    std::fs::create_dir_all(&repos_dir)
+        .map_err(|e| format!("Failed to create repos directory: {}", e))?;
+    
+    let repo_path = repos_dir.join(&repo_name);
+    
+    // Security check: ensure repo_name doesn't contain path traversal characters
+    if repo_name.contains("..") || repo_name.contains("/") || repo_name.contains("\\") {
+        return Err("Invalid repository name".to_string());
+    }
+    
+    // If directory already exists, it's already cloned
+    if repo_path.exists() {
+        return Ok(format!("Repository '{}' already exists at {}", repo_name, repo_path.display()));
+    }
+    
+    // Clone the repository
+    let output = Command::new("git")
+        .arg("clone")
+        .arg(&git_url)
+        .arg(&repo_path)
+        .output()
+        .map_err(|e| format!("Failed to execute git clone: {}", e))?;
+    
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Git clone failed: {}", err_msg));
+    }
+    
+    // Verify the clone was successful
+    if repo_path.exists() {
+        Ok(format!("Repository '{}' cloned successfully to {}", repo_name, repo_path.display()))
+    } else {
+        Err("Clone succeeded but directory not found".to_string())
+    }
+}
+
+#[tauri::command]
+async fn api_get_repositories(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use serde_json::json;
+    
+    let base = {
+        let cfg = state.config.lock().unwrap();
+        let b = cfg.base_url.clone();
+        if b.trim().is_empty() {
+            default_base_url()
+        } else {
+            b
+        }
+    };
+    
+    let url = format!("{}/api/repository/list", base.trim_end_matches('/'));
+    let (_status, json) = http_get_json(&url).await?;
+    
+    if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+        return Ok(serde_json::to_string(items).unwrap_or_default());
+    }
+    
+    Ok("[]".to_string())
 }
 
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {

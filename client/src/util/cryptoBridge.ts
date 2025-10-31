@@ -40,8 +40,10 @@ interface IFlashBackCrypto {
 interface IFlashBackAPI {
     apiRegisterJson: () => Promise<{ status: number; data: any }>;
     apiGetClients: () => Promise<{ status: number; clients: any[] }>;
-    apiReady: (localIP: string, remoteIP: string, broadcastPort: number) => Promise<string>;
+    apiGetRepositories: () => Promise<string | any[]>;
+    apiReady: (localIP: string, remoteIP: string, broadcastPort: number, repoNames?: string[]) => Promise<string>;
     apiLookup: (email: string, minutes?: number) => Promise<string>;
+    apiCloneRepository: (repoName: string, gitUrl?: string) => Promise<string>;
 }
 
 declare global {

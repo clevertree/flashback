@@ -63,8 +63,12 @@ export class BroadcastSourceModel extends Model {
     user_id!: number | null;
 
     @AllowNull(false)
-    @Column(DataType.STRING(256))
-    socket_address!: string;
+    @Column(DataType.JSON)
+    socket_addresses!: string[]; // Array of IP addresses the client is hosting on
+
+    @AllowNull(true)
+    @Column(DataType.JSON)
+    repository_names!: string[] | null; // List of repository names this client is hosting
 }
 
 // New Broadcast model for Relay Tracker
@@ -127,11 +131,28 @@ export class RepositoryModel extends Model {
     @Unique
     @AllowNull(false)
     @Column(DataType.STRING(256))
-    title!: string;
+    name!: string; // Unique repository identifier (e.g., "movies", "tv-shows")
+
+    @AllowNull(true)
+    @Column(DataType.TEXT)
+    description!: string | null; // Human-readable description
 
     @AllowNull(false)
-    @Column(DataType.STRING(512))
-    url!: string;
+    @Column(DataType.TEXT)
+    git_url!: string; // Git repository URL for cloning
+
+    @AllowNull(false)
+    @Column(DataType.JSON)
+    rules!: Record<string, any>; // Strict rules for dir/file names and data allowed
+
+    @AllowNull(true)
+    @Column(DataType.STRING(256))
+    certificate_subject!: string | null; // X.509 certificate subject for signing commits
+
+    @Index
+    @AllowNull(false)
+    @Column(DataType.DATE)
+    created_at!: Date;
 }
 
 const databaseUrl = process.env.PGSQL_DATABASE_URL || process.env.DATABASE_URL;

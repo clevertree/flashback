@@ -6,6 +6,7 @@ export interface RemoteHouseProps {
   clientPort: number;
   clientEmail?: string;
   publicCertificate?: string; // Must come from relay tracker server only
+  repositoryName?: string; // Optional: if set, browse specific repository on client
   onClose?: () => void;
 }
 
@@ -21,6 +22,7 @@ export default function RemoteHouse({
   clientPort,
   clientEmail,
   publicCertificate,
+  repositoryName,
   onClose,
 }: RemoteHouseProps) {
   const [currentPath, setCurrentPath] = useState("/");
@@ -216,7 +218,9 @@ export default function RemoteHouse({
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b border-slate-700">
           <div>
-            <h2 className="text-2xl font-semibold text-white">Remote House</h2>
+            <h2 className="text-2xl font-semibold text-white">
+              Remote House{repositoryName && ` - ${repositoryName}`}
+            </h2>
             <p className="text-sm text-gray-400">
               {clientEmail || `${clientIp}:${clientPort}`}
               {currentPath !== "/" && ` - ${currentPath}`}
