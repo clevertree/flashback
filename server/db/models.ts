@@ -2,15 +2,18 @@ import 'reflect-metadata';
 import {
     AllowNull,
     AutoIncrement,
+    BelongsTo,
     Column,
     DataType,
+    Default,
     ForeignKey,
     HasMany,
     Model,
     PrimaryKey,
     Sequelize,
     Table,
-    Unique
+    Unique,
+    Index
 } from 'sequelize-typescript';
 
 // User model with decorators
@@ -27,10 +30,6 @@ export class UserModel extends Model {
     @Column(DataType.INTEGER)
     id!: number;
 
-    // @AllowNull(false)
-    // @Column(DataType.ENUM('user', 'admin'))
-    // type!: UserModelerType;
-
     @Unique
     @AllowNull(false)
     @Column(DataType.STRING(256))
@@ -42,6 +41,9 @@ export class UserModel extends Model {
 
     @HasMany(() => BroadcastSourceModel)
     uploads!: BroadcastSourceModel[];
+
+    @HasMany(() => BroadcastModel)
+    broadcasts!: BroadcastModel[];
 }
 
 @Table({
@@ -63,6 +65,52 @@ export class BroadcastSourceModel extends Model {
     @AllowNull(false)
     @Column(DataType.STRING(256))
     socket_address!: string;
+}
+
+// New Broadcast model for Relay Tracker
+@Table({
+    tableName: 'broadcast',
+    timestamps: true,
+    paranoid: false
+})
+export class BroadcastModel extends Model {
+    @PrimaryKey
+    @AutoIncrement
+    @Column(DataType.INTEGER)
+    id!: number;
+
+    @ForeignKey(() => UserModel)
+    @AllowNull(false)
+    @Column(DataType.INTEGER)
+    user_id!: number;
+
+    @BelongsTo(() => UserModel)
+    user!: UserModel;
+
+    @AllowNull(false)
+    @Column(DataType.INTEGER)
+    port!: number;
+
+    @AllowNull(false)
+    @Column(DataType.JSON)
+    addresses!: string[];
+
+    @AllowNull(true)
+    @Column(DataType.JSON)
+    capabilities!: Record<string, any> | null;
+
+    @AllowNull(false)
+    @Default(DataType.NOW)
+    @Column(DataType.DATE)
+    created_at!: Date;
+
+    @AllowNull(false)
+    @Column(DataType.DATE)
+    expires_at!: Date;
+
+    @AllowNull(true)
+    @Column(DataType.DATE)
+    last_heartbeat!: Date | null;
 }
 
 @Table({
@@ -99,6 +147,7 @@ const sequelize = new Sequelize(databaseUrl, {
     models: [
         UserModel,
         BroadcastSourceModel,
+        BroadcastModel,
         RepositoryModel,
     ]
 });
@@ -106,14 +155,13 @@ const sequelize = new Sequelize(databaseUrl, {
 // Initialize database connection
 export async function initDatabase() {
     try {
-        // await sequelize.authenticate();
         const isTestMode =
             process.env.NODE_ENV === 'test' ||
             process.env.CYPRESS_RESET_DB === 'true' ||
             process.env.TEST_MODE === 'true';
-        
+
         await sequelize.sync({
-            alter: isTestMode ? true : false,
+            alter: true,
             force: false,
             logging: isTestMode ? console.log : false
         });
