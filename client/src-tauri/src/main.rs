@@ -2,6 +2,7 @@
 
 // Declare library modules
 mod cli;
+mod commands;
 mod http_server;
 
 use hex as hex_crate;
@@ -1685,7 +1686,20 @@ fn main() {
                 list_shareable_files,
                 get_shareable_file,
                 ui_load_private_key,
-                ui_generate_user_keys_and_cert
+                ui_generate_user_keys_and_cert,
+                // Fabric commands (Phase 1 implementation)
+                commands::fabric::fabric_get_channels,
+                commands::fabric::fabric_subscribe_channel,
+                commands::fabric::fabric_unsubscribe_channel,
+                commands::fabric::fabric_query_entries,
+                commands::fabric::fabric_get_entry,
+                commands::fabric::fabric_query_comments,
+                commands::fabric::fabric_add_entry,
+                commands::fabric::fabric_update_entry,
+                commands::fabric::fabric_delete_entry,
+                commands::fabric::fabric_add_comment,
+                commands::fabric::fabric_update_comment,
+                commands::fabric::fabric_delete_comment
             ])
             .build(context)
             .expect("failed to build tauri app for CLI mode");
@@ -1807,7 +1821,20 @@ fn main() {
             list_shareable_files,
             get_shareable_file,
             ui_load_private_key,
-            ui_generate_user_keys_and_cert
+            ui_generate_user_keys_and_cert,
+            // Fabric commands (Phase 1 implementation)
+            commands::fabric::fabric_get_channels,
+            commands::fabric::fabric_subscribe_channel,
+            commands::fabric::fabric_unsubscribe_channel,
+            commands::fabric::fabric_query_entries,
+            commands::fabric::fabric_get_entry,
+            commands::fabric::fabric_query_comments,
+            commands::fabric::fabric_add_entry,
+            commands::fabric::fabric_update_entry,
+            commands::fabric::fabric_delete_entry,
+            commands::fabric::fabric_add_comment,
+            commands::fabric::fabric_update_comment,
+            commands::fabric::fabric_delete_comment
         ])
         .run(context)
         .expect("error while running tauri application");
