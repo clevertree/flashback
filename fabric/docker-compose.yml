@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  # Hyperledger Fabric Certificate Authority
+  ca.org1.flashback.local:
+    image: hyperledger/fabric-ca:latest
+    container_name: ca.org1.flashback.local
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org1
+      - FABRIC_CA_SERVER_PORT=7054
+      - FABRIC_CA_SERVER_ADMIN_USER_ID=admin
+      - FABRIC_CA_SERVER_ADMIN_USER_PASS=adminpw
+    ports:
+      - "7054:7054"
+    volumes:
+      - ./ca_server:/etc/hyperledger/fabric-ca-server
+    command: sh -c 'fabric-ca-server start -b admin:adminpw'
+    networks:
+      - flashback
+
+  # CouchDB for Fabric state database
+  couchdb.org1.flashback.local:
+    image: couchdb:3.1
+    container_name: couchdb.org1.flashback.local
+    environment:
+      COUCHDB_USER: admin
+      COUCHDB_PASSWORD: password
+      COUCHDB_URL: http://admin:password@localhost:5984/
+    ports:
+      - "5984:5984"
+    volumes:
+      - ./couchdb_data:/opt/couchdb/data
+    networks:
+      - flashback
+
+  # Hyperledger Fabric Peer Node
+  peer0.org1.flashback.local:
+    image: hyperledger/fabric-peer:latest
+    container_name: peer0.org1.flashback.local
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_CHAINCODE_LOGGING_LEVEL=INFO
+      - CORE_PEER_ID=peer0.org1.flashback.local
+      - CORE_PEER_ADDRESS=peer0.org1.flashback.local:7051
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.flashback.local:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.flashback.local:7051
+      - CORE_PEER_GOSSIP_ENDPOINT=peer0.org1.flashback.local:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/msp/peer/
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.flashback.local:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb.org1.flashback.local:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=password
+    ports:
+      - "7051:7051"
+      - "7052:7052"
+    volumes:
+      - ./peer_data:/var/hyperledger/production
+      - ./peer_msp:/etc/hyperledger/msp/peer
+      - ./peer_tls:/etc/hyperledger/fabric/tls
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - couchdb.org1.flashback.local
+    networks:
+      - flashback
+
+  # Hyperledger Fabric Orderer Node
+  orderer.flashback.local:
+    image: hyperledger/fabric-orderer:latest
+    container_name: orderer.flashback.local
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_GENESISMETHOD=file
+      - ORDERER_GENERAL_GENESISFILE=/var/hyperledger/orderer/orderer.genesis.block
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+    ports:
+      - "7050:7050"
+    volumes:
+      - ./orderer_data:/var/hyperledger/production/orderer
+      - ./orderer_msp:/var/hyperledger/orderer/msp
+      - ./orderer_tls:/var/hyperledger/orderer/tls
+      - ./genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+    networks:
+      - flashback
+
+  # CLI for management operations
+  cli:
+    image: hyperledger/fabric-tools:latest
+    container_name: fabric-cli
+    environment:
+      - FABRIC_CFG_PATH=/etc/hyperledger/fabric
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.org1.flashback.local:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/msp/peer/users/Admin@org1.flashback.local/msp
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/peer.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/peer.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+    volumes:
+      - ./cli_scripts:/scripts
+      - ./peer_msp:/etc/hyperledger/msp/peer
+      - ./peer_tls:/etc/hyperledger/fabric/tls
+      - ./channel_artifacts:/var/hyperledger/fabric/channel_artifacts
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    depends_on:
+      - peer0.org1.flashback.local
+      - orderer.flashback.local
+    networks:
+      - flashback
+    stdin_open: true
+    tty: true
+
+networks:
+  flashback:
+    driver: bridge
+
+volumes:
+  ca_server:
+  couchdb_data:
+  peer_data:
+  orderer_data:

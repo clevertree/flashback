@@ -41,6 +41,15 @@ pub enum FabricError {
     /// Timeout waiting for response
     Timeout(String),
     
+    /// Proposal submission error
+    ProposalError(String),
+    
+    /// Transaction submission error
+    TransactionError(String),
+    
+    /// Query error
+    QueryError(String),
+    
     /// Other error
     Other(String),
 }
@@ -59,6 +68,9 @@ impl fmt::Display for FabricError {
             FabricError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
             FabricError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
             FabricError::Timeout(msg) => write!(f, "Timeout: {}", msg),
+            FabricError::ProposalError(msg) => write!(f, "Proposal error: {}", msg),
+            FabricError::TransactionError(msg) => write!(f, "Transaction error: {}", msg),
+            FabricError::QueryError(msg) => write!(f, "Query error: {}", msg),
             FabricError::Other(msg) => write!(f, "Error: {}", msg),
         }
     }

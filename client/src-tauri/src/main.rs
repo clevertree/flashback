@@ -1683,10 +1683,6 @@ fn main() {
                 peer_send_dcc_chat,
                 api_register,
                 api_register_json,
-                api_get_clients,
-                api_get_repositories,
-                api_ready,
-                api_lookup,
                 api_clone_repository,
                 list_shareable_files,
                 get_shareable_file,
@@ -1818,10 +1814,6 @@ fn main() {
             peer_send_dcc_chat,
             api_register,
             api_register_json,
-            api_get_clients,
-            api_get_repositories,
-            api_ready,
-            api_lookup,
             api_clone_repository,
             list_shareable_files,
             get_shareable_file,
@@ -2133,136 +2125,6 @@ async fn api_register_json(state: State<'_, AppState>) -> Result<serde_json::Val
     }))
 }
 
-#[tauri::command]
-async fn api_get_clients(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let base = {
-        let cfg = state.config.lock().unwrap();
-        let b = cfg.base_url.clone();
-        if b.trim().is_empty() {
-            default_base_url()
-        } else {
-            b
-        }
-    };
-    let url = format!("{}/api/clients", base.trim_end_matches('/'));
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to get clients: {}", e))?;
-    let status = response.status();
-    let json = response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-    Ok(serde_json::json!({
-        "status": status.as_u16(),
-        "clients": json.get("clients").cloned().unwrap_or(serde_json::json!([]))
-    }))
-}
-
-#[tauri::command]
-async fn api_ready(
-    localIP: Option<String>,
-    remoteIP: Option<String>,
-    broadcastPort: Option<u16>,
-    repo_names: Option<Vec<String>>,
-    state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<String, String> {
-    let base = {
-        let cfg = state.config.lock().unwrap();
-        let b = cfg.base_url.clone();
-        if b.trim().is_empty() {
-            default_base_url()
-        } else {
-            b
-        }
-    };
-    let cfg_cur = state.config.lock().unwrap().clone();
-
-    // Validate repositories if provided
-    if let Some(ref repo_list) = repo_names {
-        let file_root = &cfg_cur.file_root_directory;
-        let repos_dir = std::path::PathBuf::from(file_root).join("repos");
-        
-        for repo_name in repo_list {
-            let repo_path = repos_dir.join(repo_name);
-            if !repo_path.exists() {
-                return Err(format!("Repository '{}' not found locally at {:?}", repo_name, repo_path));
-            }
-            if !repo_path.is_dir() {
-                return Err(format!("Repository '{}' exists but is not a directory", repo_name));
-            }
-            log::info!("Validated repository: {}", repo_name);
-        }
-    }
-
-    // Ensure peer listener is started and configured
-    let need_start = { state.self_info.lock().unwrap().is_none() };
-    if need_start {
-        let bind_host = localIP.clone().filter(|s| !s.trim().is_empty());
-        let bind_port = broadcastPort;
-        let _ = start_peer_listener_async(state.clone(), app_handle.clone(), bind_host, bind_port)
-            .await?;
-    }
-    // After ensuring listener, read the actual port
-    let (actual_local_ip, actual_port) = {
-        let me = state
-            .self_info
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "Failed to start listener".to_string())?;
-        (me.local_ip, me.port)
-    };
-
-    // Build the socket_address to announce
-    let remote_host_opt: Option<String> = if let Some(r) = remoteIP.clone() {
-        let r = r.trim();
-        if r.is_empty() {
-            None
-        } else if r.contains(':') {
-            parse_host_port(r).ok().map(|(h, _)| h)
-        } else {
-            Some(r.to_string())
-        }
-    } else {
-        None
-    };
-    let host_for_broadcast = remote_host_opt
-        .or_else(|| localIP.clone())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-    let sock = format!("{}:{}", host_for_broadcast, actual_port);
-
-    let url = format!("{}/api/broadcast/ready", base.trim_end_matches('/'));
-    let email_val = cfg_cur.email.clone();
-    if email_val.trim().is_empty() {
-        return Err("Email is not set in config. Please generate keys (username) first.".to_string());
-    }
-    
-    let mut body = serde_json::json!({"email": email_val, "socket_address": sock});
-    
-    // Add repository list to broadcast if provided
-    if let Some(repos) = repo_names {
-        body["repositories"] = serde_json::json!(repos);
-    }
-    
-    let (status, json) = http_post_json(&url, body).await?;
-    if status == StatusCode::OK || status == StatusCode::CREATED {
-        Ok(format!(
-            "READY OK {}",
-            json.get("socket_address")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-        ))
-    } else {
-        Ok(format!("READY ERROR {} {}", status.as_u16(), json))
-    }
-}
-
 // Allowed file extensions for serving (whitelist)
 const ALLOWED_FILE_EXTENSIONS: &[&str] = &[
     ".md", ".markdown", ".txt", ".css",
@@ -2370,43 +2232,6 @@ async fn get_shareable_file(path: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn api_lookup(
-    email: String,
-    minutes: Option<u32>,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let base = {
-        let cfg = state.config.lock().unwrap();
-        let b = cfg.base_url.clone();
-        if b.trim().is_empty() {
-            default_base_url()
-        } else {
-            b
-        }
-    };
-    let mins = minutes.unwrap_or(10);
-    let url = format!(
-        "{}/api/broadcast/lookup?email={}&minutes={}",
-        base.trim_end_matches('/'),
-        email,
-        mins
-    );
-    let (status, json) = http_get_json(&url).await?;
-    if status == StatusCode::OK {
-        if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-            if let Some(first) = items.first() {
-                if let Some(sock) = first.get("socket_address").and_then(|v| v.as_str()) {
-                    return Ok(format!("LOOKUP SOCKET {}", sock));
-                }
-            }
-        }
-        Ok("LOOKUP NONE".to_string())
-    } else {
-        Ok(format!("LOOKUP ERROR {} {}", status.as_u16(), json))
-    }
-}
-
-#[tauri::command]
 async fn api_clone_repository(
     repo_name: String,
     git_url: String,
@@ -2456,32 +2281,6 @@ async fn api_clone_repository(
     } else {
         Err("Clone succeeded but directory not found".to_string())
     }
-}
-
-#[tauri::command]
-async fn api_get_repositories(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    use serde_json::json;
-    
-    let base = {
-        let cfg = state.config.lock().unwrap();
-        let b = cfg.base_url.clone();
-        if b.trim().is_empty() {
-            default_base_url()
-        } else {
-            b
-        }
-    };
-    
-    let url = format!("{}/api/repository/list", base.trim_end_matches('/'));
-    let (_status, json) = http_get_json(&url).await?;
-    
-    if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-        return Ok(serde_json::to_string(items).unwrap_or_default());
-    }
-    
-    Ok("[]".to_string())
 }
 
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
@@ -3044,83 +2843,6 @@ fn run_cli(app: tauri::App) {
                 // let base = parts.next().map(|s| s.to_string());
                 let st = state.clone();
                 let fut = api_register(st);
-                match async_runtime::block_on(fut) {
-                    Ok(m) => println!("{}", m),
-                    Err(e) => println!("Error: {}", e),
-                }
-            }
-            "api-ready" => {
-                // usage: api-ready [baseUrl] [ip:port]
-                let first = parts.next().map(|s| s.to_string());
-                let (maybe_base, sock_opt) = if let Some(f) = first.clone() {
-                    if f.contains("://") {
-                        (first, parts.next().map(|s| s.to_string()))
-                    } else {
-                        (None, first)
-                    }
-                } else {
-                    (None, None)
-                };
-                // If baseUrl provided, persist into runtime config
-                if let Some(b) = maybe_base {
-                    if !b.trim().is_empty() {
-                        let mut cfg = state.config.lock().unwrap();
-                        cfg.base_url = b;
-                        save_config_to_disk(&cfg.clone());
-                    }
-                }
-                let st = state.clone();
-                // Map optional ip:port to localIP and broadcastPort; remoteIP unused in CLI
-                let (local_ip_opt, port_opt): (Option<String>, Option<u16>) =
-                    if let Some(sock) = sock_opt.clone() {
-                        if let Ok((h, p)) = parse_host_port(&sock) {
-                            (Some(h), Some(p))
-                        } else {
-                            (None, None)
-                        }
-                    } else {
-                        (None, None)
-                    };
-                let fut = api_ready(local_ip_opt, None, port_opt, None, st, app_handle.clone());
-                match async_runtime::block_on(fut) {
-                    Ok(m) => println!("{}", m),
-                    Err(e) => println!("Error: {}", e),
-                }
-            }
-            "api-lookup" => {
-                // usage: api-lookup [baseUrl] <email> [minutes]
-                let mut base: Option<String> = None;
-                let first = parts.next().map(|s| s.to_string());
-                let (email, minutes) = if let Some(f) = first.clone() {
-                    if f.contains("://") {
-                        base = first;
-                        (
-                            parts.next().map(|s| s.to_string()),
-                            parts.next().and_then(|m| m.parse::<u32>().ok()),
-                        )
-                    } else {
-                        (first, parts.next().and_then(|m| m.parse::<u32>().ok()))
-                    }
-                } else {
-                    (None, None)
-                };
-                // Persist provided baseUrl into config if present
-                if let Some(b) = base.clone() {
-                    if !b.trim().is_empty() {
-                        let mut cfg = state.config.lock().unwrap();
-                        cfg.base_url = b;
-                        save_config_to_disk(&cfg.clone());
-                    }
-                }
-                let email = match email {
-                    Some(p) => p,
-                    None => {
-                        println!("Usage: api-lookup [baseUrl] <email> [minutes]");
-                        continue;
-                    }
-                };
-                let st = state.clone();
-                let fut = api_lookup(email, minutes, st);
                 match async_runtime::block_on(fut) {
                     Ok(m) => println!("{}", m),
                     Err(e) => println!("Error: {}", e),

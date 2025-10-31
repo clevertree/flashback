@@ -16,10 +16,14 @@
 ///   ↓ (connects to)
 /// Hyperledger Fabric Network
 
+pub mod ca_enrollment;
+pub mod grpc_client;
 pub mod client;
 pub mod certificate;
 pub mod errors;
 
+pub use ca_enrollment::{CAEnrollmentManager, EnrollmentRequest, EnrollmentResponse};
+pub use grpc_client::{FabricGRPCClient, ProposalPayload, Endorsement, TransactionStatus, QueryResult};
 pub use client::{FabricClient, FabricConfig};
 pub use certificate::CertificateManager;
 pub use errors::{FabricError, FabricResult};
