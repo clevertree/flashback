@@ -1,0 +1,19 @@
+{
+  "package": {
+    "productName": "Fabric Desktop",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://localhost:3000",
+    "distDir": "../.next"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "Fabric Desktop Client"
+      }
+    ]
+  }
+}
