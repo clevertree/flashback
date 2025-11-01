@@ -2,6 +2,16 @@
 
 ## Quick Start
 
+### 0. Setup Git Hooks (First Time Only)
+
+```bash
+# After cloning, install git hooks
+./scripts/setup-git-hooks.sh
+
+# This ensures all commits pass build verification
+# See docs/GIT_HOOKS.md for details
+```
+
 ### 1. Setup Rust Backend
 
 ```bash
