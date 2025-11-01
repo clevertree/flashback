@@ -2,7 +2,7 @@
 use crate::error::{Result, FabricCoreError};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Represents a complete identity for Hyperledger Fabric network participation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,8 +119,8 @@ impl CryptoManager {
 
     /// Verify a certificate against CA certificate
     pub fn verify_certificate(
-        cert_pem: &str,
-        ca_cert_pem: &str,
+        _cert_pem: &str,
+        _ca_cert_pem: &str,
     ) -> Result<bool> {
         // Placeholder for certificate verification logic
         // In production, use rustls or openssl
@@ -129,7 +129,7 @@ impl CryptoManager {
     }
 
     /// Sign data with private key
-    pub fn sign(private_key_pem: &str, data: &[u8]) -> Result<Vec<u8>> {
+    pub fn sign(_private_key_pem: &str, data: &[u8]) -> Result<Vec<u8>> {
         // Placeholder - implement with ring or openssl
         tracing::debug!("Signing {} bytes", data.len());
         Ok(Vec::new())
@@ -137,9 +137,9 @@ impl CryptoManager {
 
     /// Verify signature with public key
     pub fn verify(
-        public_key_pem: &str,
-        data: &[u8],
-        signature: &[u8],
+        _public_key_pem: &str,
+        _data: &[u8],
+        _signature: &[u8],
     ) -> Result<bool> {
         // Placeholder - implement with ring or openssl
         tracing::debug!("Verifying signature");

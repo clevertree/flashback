@@ -3,7 +3,6 @@ use crate::error::{Result, FabricCoreError};
 use crate::crypto::FabricIdentity;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Configuration for connecting to a Hyperledger Fabric network
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +80,7 @@ pub trait FabricNetworkClient: Send + Sync {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        args: Vec<String>,
+        _args: Vec<String>,
     ) -> Result<serde_json::Value>;
 
     /// Invoke chaincode (submit transaction)
@@ -90,7 +89,7 @@ pub trait FabricNetworkClient: Send + Sync {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        args: Vec<String>,
+        _args: Vec<String>,
     ) -> Result<TransactionResult>;
 
     /// Get transaction history
@@ -218,7 +217,7 @@ impl FabricNetworkClient for KaleidoFabricClient {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        args: Vec<String>,
+        _args: Vec<String>,
     ) -> Result<serde_json::Value> {
         if !self.connected {
             return Err(FabricCoreError::ConnectionError(
@@ -245,7 +244,7 @@ impl FabricNetworkClient for KaleidoFabricClient {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        args: Vec<String>,
+        _args: Vec<String>,
     ) -> Result<TransactionResult> {
         if !self.connected {
             return Err(FabricCoreError::ConnectionError(
