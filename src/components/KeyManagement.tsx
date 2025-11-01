@@ -41,7 +41,10 @@ export default function KeyManagement() {
     <div className="space-y-6">
       <div className="rounded-lg bg-slate-800 p-6">
         <div className="mb-4 flex items-center gap-2">
-          <Key className="h-6 w-6 text-cyan-400" />
+          <Key
+            className="h-6 w-6 text-cyan-400"
+            data-testid="key-icon"
+          />
           <h2 className="text-2xl font-bold">Key Management</h2>
         </div>
 

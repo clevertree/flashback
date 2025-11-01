@@ -45,7 +45,10 @@ export default function NetworkConnection() {
     <div className="space-y-6">
       <div className="rounded-lg bg-slate-800 p-6">
         <div className="mb-4 flex items-center gap-2">
-          <Network className="h-6 w-6 text-cyan-400" />
+          <Network
+            className="h-6 w-6 text-cyan-400"
+            data-testid="network-icon"
+          />
           <h2 className="text-2xl font-bold">
             Network Connection
           </h2>
