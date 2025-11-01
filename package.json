@@ -24,9 +24,12 @@
     "test:e2e:live": "CYPRESS_USE_LIVE_KALEIDO=true cypress run --spec 'cypress/e2e/kaleido-live.cy.ts'",
     "deploy:kaleido": "node scripts/deploy-to-kaleido.js",
     "deploy:kaleido:dry": "node scripts/deploy-to-kaleido.js --dry-run",
+    "deploy:kaleido:live": "node scripts/deploy-kaleido-live.mjs",
+    "deploy:kaleido:live:dry": "node scripts/deploy-kaleido-live.mjs --dry-run",
+    "check:kaleido": "node scripts/check-kaleido-status.mjs",
     "cli:dev": "tsx scripts/fabric-cli.ts",
-    "cli:test": "jest __tests__/cli-e2e.mjs --testTimeout=30000",
-    "cli:test:live": "USE_LIVE_KALEIDO=true jest __tests__/cli-e2e.mjs --testTimeout=30000"
+    "cli:test": "NODE_OPTIONS='--experimental-vm-modules' jest __tests__/cli-e2e.test.mjs --testTimeout=30000 --detectOpenHandles --forceExit",
+    "cli:test:live": "NODE_OPTIONS='--experimental-vm-modules' USE_LIVE_KALEIDO=true jest __tests__/cli-e2e.test.mjs --testTimeout=30000 --detectOpenHandles --forceExit"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.0",
