@@ -14,8 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  Pre-Commit Verification${NC}"
-echo -e "${BLUE}  Tests + Builds${NC}"
+echo -e "${BLUE}  Pre-Commit Build Verification${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -88,6 +87,43 @@ else
     tail -50 /tmp/cargo-tests.log
     echo ""
     VERIFICATION_FAILED=1
+fi
+
+# Step 5: Run Go Chaincode Tests (if chaincode directory exists)
+if [ -d "$PROJECT_ROOT/chaincode/movie" ]; then
+    echo -e "${YELLOW}[5/5]${NC} Building and testing Go chaincode..."
+    echo ""
+    
+    cd "$PROJECT_ROOT/chaincode/movie"
+    
+    if go build -o /tmp/movie-chaincode . > /tmp/go-build.log 2>&1; then
+        echo -e "${GREEN}✓${NC} Go chaincode build successful"
+        echo ""
+    else
+        echo -e "${RED}✗${NC} Go chaincode build failed!"
+        echo ""
+        echo -e "${YELLOW}Build Output:${NC}"
+        cat /tmp/go-build.log
+        echo ""
+        VERIFICATION_FAILED=1
+    fi
+    
+    # Run Go tests if they exist
+    if [ -f "$PROJECT_ROOT/chaincode/movie/movie_test.go" ] || [ -f "$PROJECT_ROOT/chaincode/movie/models_test.go" ]; then
+        if go test ./... -v > /tmp/go-tests.log 2>&1; then
+            echo -e "${GREEN}✓${NC} Go chaincode tests passed"
+            echo ""
+        else
+            echo -e "${RED}✗${NC} Go chaincode tests failed!"
+            echo ""
+            echo -e "${YELLOW}Test Output:${NC}"
+            tail -30 /tmp/go-tests.log
+            echo ""
+            VERIFICATION_FAILED=1
+        fi
+    fi
+    
+    cd "$PROJECT_ROOT"
 fi
 
 # Summary
