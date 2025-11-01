@@ -19,7 +19,11 @@
     "cypress": "cypress",
     "cypress:open": "cypress open",
     "cypress:run": "cypress run",
-    "e2e": "cypress run --e2e"
+    "e2e": "cypress run --e2e",
+    "test:e2e": "cypress run --spec 'cypress/e2e/chaincode.cy.ts'",
+    "test:e2e:live": "CYPRESS_USE_LIVE_KALEIDO=true cypress run --spec 'cypress/e2e/kaleido-live.cy.ts'",
+    "deploy:kaleido": "node scripts/deploy-to-kaleido.js",
+    "deploy:kaleido:dry": "node scripts/deploy-to-kaleido.js --dry-run"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.0",
