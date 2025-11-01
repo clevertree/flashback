@@ -217,7 +217,7 @@ impl FabricNetworkClient for KaleidoFabricClient {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        _args: Vec<String>,
+        args: Vec<String>,
     ) -> Result<serde_json::Value> {
         if !self.connected {
             return Err(FabricCoreError::ConnectionError(
@@ -225,18 +225,60 @@ impl FabricNetworkClient for KaleidoFabricClient {
             ));
         }
 
-        tracing::debug!(
-            "Querying chaincode: channel={}, id={}, function={}",
+        let http_client = self.http_client.as_ref().ok_or(FabricCoreError::ConnectionError(
+            "HTTP client not initialized".to_string(),
+        ))?;
+
+        // Build Kaleido REST API URL for query
+        let query_url = format!(
+            "{}/channels/{}/chaincodes/{}/{}",
+            self.config.gateway_url.trim_end_matches('/'),
             channel_id,
             chaincode_id,
             function
         );
 
-        // Placeholder for actual chaincode query
-        Ok(serde_json::json!({
-            "status": "success",
-            "results": []
-        }))
+        // Build query request body
+        let request_body = serde_json::json!({
+            "args": args,
+            "sync": true,
+        });
+
+        tracing::debug!(
+            "Querying chaincode: channel={}, id={}, function={}, url={}",
+            channel_id,
+            chaincode_id,
+            function,
+            query_url
+        );
+
+        // Make HTTP request to Kaleido
+        let response = http_client
+            .post(&query_url)
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| FabricCoreError::QueryError(e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FabricCoreError::QueryError(format!(
+                "Query failed with status {}: {}",
+                status, error_text
+            )));
+        }
+
+        let result = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| FabricCoreError::QueryError(e.to_string()))?;
+
+        tracing::debug!("Query successful: {:?}", result);
+        Ok(result)
     }
 
     async fn invoke_chaincode(
@@ -244,7 +286,7 @@ impl FabricNetworkClient for KaleidoFabricClient {
         channel_id: &str,
         chaincode_id: &str,
         function: &str,
-        _args: Vec<String>,
+        args: Vec<String>,
     ) -> Result<TransactionResult> {
         if !self.connected {
             return Err(FabricCoreError::ConnectionError(
@@ -252,18 +294,84 @@ impl FabricNetworkClient for KaleidoFabricClient {
             ));
         }
 
-        tracing::info!(
-            "Invoking chaincode: channel={}, id={}, function={}",
+        let http_client = self.http_client.as_ref().ok_or(FabricCoreError::ConnectionError(
+            "HTTP client not initialized".to_string(),
+        ))?;
+
+        // Build Kaleido REST API URL for invocation
+        let invoke_url = format!(
+            "{}/channels/{}/chaincodes/{}/{}",
+            self.config.gateway_url.trim_end_matches('/'),
             channel_id,
             chaincode_id,
             function
         );
 
-        // Placeholder for actual chaincode invocation
+        // Build invoke request body
+        let request_body = serde_json::json!({
+            "args": args,
+            "sync": true,
+            "private_data": {},
+        });
+
+        tracing::info!(
+            "Invoking chaincode: channel={}, id={}, function={}, url={}",
+            channel_id,
+            chaincode_id,
+            function,
+            invoke_url
+        );
+
+        // Make HTTP request to Kaleido
+        let response = http_client
+            .post(&invoke_url)
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| FabricCoreError::InvocationError(e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(FabricCoreError::InvocationError(format!(
+                "Invocation failed with status {}: {}",
+                status, error_text
+            )));
+        }
+
+        let result = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| FabricCoreError::InvocationError(e.to_string()))?;
+
+        // Extract transaction ID from response
+        let transaction_id = result
+            .get("transactionId")
+            .or_else(|| result.get("txn_id"))
+            .or_else(|| result.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(&uuid::Uuid::new_v4().to_string())
+            .to_string();
+
+        let payload = result
+            .get("result")
+            .or_else(|| result.get("payload"))
+            .cloned()
+            .unwrap_or_else(|| result.clone());
+
+        tracing::info!(
+            "Invocation successful: txn_id={}, status={}",
+            transaction_id,
+            "SUCCESS"
+        );
+
         Ok(TransactionResult {
-            transaction_id: uuid::Uuid::new_v4().to_string(),
+            transaction_id,
             status: "SUCCESS".to_string(),
-            payload: serde_json::json!({}),
+            payload,
             timestamp: chrono::Utc::now().to_rfc3339(),
         })
     }

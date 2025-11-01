@@ -28,6 +28,12 @@ pub enum FabricCoreError {
     #[error("Key management error: {0}")]
     KeyManagementError(String),
 
+    #[error("Query error: {0}")]
+    QueryError(String),
+
+    #[error("Invocation error: {0}")]
+    InvocationError(String),
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 
