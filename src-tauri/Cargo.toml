@@ -1,0 +1,31 @@
+[package]
+name = "fabric-desktop"
+version = "0.1.0"
+description = "Hyperledger Fabric Desktop Client with WebTorrent"
+authors = [""]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = "1.5"
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "1.5", features = ["shell-open", "http-client"] }
+tokio = { workspace = true }
+fabric-core = { path = "../crates/fabric-core" }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

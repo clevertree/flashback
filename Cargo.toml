@@ -1,0 +1,37 @@
+[workspace]
+members = [
+  "crates/fabric-core",
+  "crates/fabric-cli",
+  "src-tauri"
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Hyperledger Fabric
+fabric-client = "0.4"
+fabric-protobuf = "0.4"
+
+# Cryptography
+openssl = "0.10"
+x509-certificate = "0.23"
+ring = "0.17"
+rustls = "0.21"
+
+# WebTorrent
+webtorrent = "0.1"
+bendy = "0.3"
+
+# Tauri
+tauri = { version = "1.5", features = ["shell-open", "http-client"] }
+tauri-build = "1.5"
