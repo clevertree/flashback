@@ -17,6 +17,14 @@
 - **[API.md](API.md)** - Complete API reference (Tauri, Rust, CLI)
 - **[AI_AGENT_GUIDE.md](AI_AGENT_GUIDE.md)** - Guide for AI developers
 
+### For Use Cases and Testing
+- **[USE_CASES.md](USE_CASES.md)** - User workflows and feature descriptions
+- **[USE_CASES_TEST_IMPLEMENTATION.md](USE_CASES_TEST_IMPLEMENTATION.md)** - E2E test implementation guide
+
+### For Blockchain Integration
+- **[KALEIDO_INTEGRATION.md](KALEIDO_INTEGRATION.md)** - Kaleido configuration and setup
+- **[KALEIDO_INTEGRATION_SUMMARY.md](KALEIDO_INTEGRATION_SUMMARY.md)** - Integration overview
+
 ## 🎯 Quick Links
 
 | Goal | Go To |
@@ -27,6 +35,9 @@
 | Learn the API | [API.md](API.md) |
 | Set up dev environment | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Find a file | [FILE_MANIFEST.md](FILE_MANIFEST.md) |
+| Understand user workflows | [USE_CASES.md](USE_CASES.md) |
+| Run tests | [USE_CASES_TEST_IMPLEMENTATION.md](USE_CASES_TEST_IMPLEMENTATION.md) |
+| Kaleido blockchain setup | [KALEIDO_INTEGRATION.md](KALEIDO_INTEGRATION.md) |
 
 ## ✨ What You Get
 
