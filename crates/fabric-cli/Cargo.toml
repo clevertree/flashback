@@ -20,7 +20,7 @@ fabric-core = { path = "../fabric-core" }
 # For CLI interactive features
 dialoguer = "0.11"
 colored = "2.1"
-prettytable-rs = "0.11"
+prettytable-rs = "0.10"
 
 # Utilities
 chrono = "0.4"

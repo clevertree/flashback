@@ -1,6 +1,9 @@
 {
   "name": "fabric-desktop",
+  "productName": "Fabric Desktop",
   "version": "0.1.0",
+  "description": "Hyperledger Fabric Desktop Client",
+  "author": "Fabric Team",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -8,8 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri:dev": "cd src-tauri && TAURI_CONFIG_DIR=.. tauri dev",
+    "tauri:build": "cd src-tauri && TAURI_CONFIG_DIR=.. tauri build",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

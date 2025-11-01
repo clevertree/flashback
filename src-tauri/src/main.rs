@@ -8,7 +8,7 @@ use fabric_core::crypto::{CryptoManager, FabricIdentity};
 use fabric_core::fabric::{FabricNetworkClient, KaleidoFabricClient, FabricNetworkConfig};
 use fabric_core::torrent::{TorrentHash, WebTorrentClient, HashType};
 use serde_json::json;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use tauri::State;
 
 // Global state management
@@ -80,8 +80,8 @@ async fn connect_network(
         .await
         .map_err(|e| e.to_string())?;
 
-    *state.fabric_client.lock().unwrap() = Some(client);
-    *state.identity.lock().unwrap() = Some(identity);
+    *state.fabric_client.lock().await = Some(client);
+    *state.identity.lock().await = Some(identity);
 
     Ok(json!({
         "status": "connected",
@@ -93,7 +93,7 @@ async fn connect_network(
 async fn get_channels(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let fabric_client = state.fabric_client.lock().unwrap();
+    let fabric_client = state.fabric_client.lock().await;
     if let Some(client) = fabric_client.as_ref() {
         match client.get_channels().await {
             Ok(channels) => {
@@ -126,7 +126,7 @@ async fn query_chaincode(
     args: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let fabric_client = state.fabric_client.lock().unwrap();
+    let fabric_client = state.fabric_client.lock().await;
     if let Some(client) = fabric_client.as_ref() {
         client
             .query_chaincode(&channel_id, &chaincode_id, &function, args)
@@ -145,7 +145,7 @@ async fn invoke_chaincode(
     args: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let fabric_client = state.fabric_client.lock().unwrap();
+    let fabric_client = state.fabric_client.lock().await;
     if let Some(client) = fabric_client.as_ref() {
         match client
             .invoke_chaincode(
@@ -179,7 +179,7 @@ async fn add_torrent(
     let torrent_hash = TorrentHash::from_magnet_link(&magnet_link)
         .map_err(|e| e.to_string())?;
 
-    let mut torrent_client = state.torrent_client.lock().unwrap();
+    let mut torrent_client = state.torrent_client.lock().await;
     let client = if let Some(ref mut c) = *torrent_client {
         c
     } else {
@@ -212,7 +212,7 @@ async fn get_torrent_progress(
     hash: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let torrent_client = state.torrent_client.lock().unwrap();
+    let torrent_client = state.torrent_client.lock().await;
     if let Some(client) = torrent_client.as_ref() {
         let torrent =
             TorrentHash::new(hash, HashType::InfoHash);

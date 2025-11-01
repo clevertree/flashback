@@ -1,37 +1,19 @@
 {
+  "package": {
+    "productName": "Fabric Desktop",
+    "version": "0.1.0"
+  },
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
     "devPath": "http://localhost:3000",
-    "frontendDist": ".next"
+    "distDir": "../.next"
   },
-  "app": {
+  "tauri": {
     "windows": [
       {
-        "title": "Fabric Desktop Client",
-        "width": 1200,
-        "height": 800,
-        "resizable": true,
-        "fullscreen": false
+        "title": "Fabric Desktop Client"
       }
-    ],
-    "security": {
-      "csp": null
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": [
-      "deb",
-      "app",
-      "dmg"
-    ],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
     ]
   }
 }

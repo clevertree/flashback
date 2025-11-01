@@ -1,5 +1,6 @@
-use tauri_build::try_build;
+use tauri_build::Attributes;
 
 fn main() {
-    try_build().expect("failed to run tauri-build");
+    let attrs = Attributes::new();
+    tauri_build::try_build(attrs).expect("failed to run tauri-build");
 }
