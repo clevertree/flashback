@@ -23,7 +23,10 @@
     "test:e2e": "cypress run --spec 'cypress/e2e/chaincode.cy.ts'",
     "test:e2e:live": "CYPRESS_USE_LIVE_KALEIDO=true cypress run --spec 'cypress/e2e/kaleido-live.cy.ts'",
     "deploy:kaleido": "node scripts/deploy-to-kaleido.js",
-    "deploy:kaleido:dry": "node scripts/deploy-to-kaleido.js --dry-run"
+    "deploy:kaleido:dry": "node scripts/deploy-to-kaleido.js --dry-run",
+    "cli:dev": "tsx scripts/fabric-cli.ts",
+    "cli:test": "jest __tests__/cli-e2e.mjs --testTimeout=30000",
+    "cli:test:live": "USE_LIVE_KALEIDO=true jest __tests__/cli-e2e.mjs --testTimeout=30000"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.0",
@@ -55,6 +58,7 @@
     "prettier": "^3.1.0",
     "tailwindcss": "^3.3.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.2.0"
   }
 }
