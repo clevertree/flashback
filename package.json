@@ -30,6 +30,8 @@
     "deploy:live:dry": "node scripts/deploy-live.mjs --dry-run",
     "deploy:api": "node scripts/deploy-api.mjs",
     "deploy:api:dry": "node scripts/deploy-api.mjs --dry-run",
+    "deploy:rest": "node scripts/deploy-rest-gateway.mjs",
+    "deploy:rest:dry": "node scripts/deploy-rest-gateway.mjs --dry-run",
     "check:kaleido": "node scripts/check-kaleido-status.mjs",
     "cli:dev": "tsx scripts/fabric-cli.ts",
     "cli:test": "NODE_OPTIONS='--experimental-vm-modules' jest __tests__/cli-e2e.test.mjs --testTimeout=30000 --detectOpenHandles --forceExit",
