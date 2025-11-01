@@ -41,6 +41,9 @@
   ],
   "exclude": [
     "node_modules",
-    "cypress"
+    "cypress",
+    "target",
+    "**/*.cy.ts",
+    "**/*.cy.tsx"
   ]
 }
