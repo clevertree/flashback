@@ -335,8 +335,14 @@ async fn handle_network_commands(
 
             let identity_data =
                 FabricIdentity::load_from_file(&identity)?;
-            let config =
-                FabricNetworkConfig::new_kaleido(&gateway, &ca);
+            let config = FabricNetworkConfig {
+                name: "Kaleido".to_string(),
+                orderers: vec![format!("{}/orderer", gateway)],
+                peers: vec![format!("{}/peer", gateway)],
+                ca_url: ca.clone(),
+                gateway_url: gateway.clone(),
+                tls_cert_path: None,
+            };
             let mut client = KaleidoFabricClient::new(config);
 
             match client.connect(&identity_data).await {
@@ -359,8 +365,14 @@ async fn handle_network_commands(
 
             let identity_data =
                 FabricIdentity::load_from_file(&identity)?;
-            let config =
-                FabricNetworkConfig::new_kaleido(&gateway, "");
+            let config = FabricNetworkConfig {
+                name: "Kaleido".to_string(),
+                orderers: vec![format!("{}/orderer", gateway)],
+                peers: vec![format!("{}/peer", gateway)],
+                ca_url: String::new(),
+                gateway_url: gateway.clone(),
+                tls_cert_path: None,
+            };
             let mut client = KaleidoFabricClient::new(config);
 
             match client.connect(&identity_data).await {
@@ -409,7 +421,7 @@ async fn handle_chaincode_commands(
             channel,
             chaincode,
             function,
-            args,
+            args: _,
         } => {
             println!(
                 "{}",
@@ -427,7 +439,7 @@ async fn handle_chaincode_commands(
             channel,
             chaincode,
             function,
-            args,
+            args: _,
         } => {
             println!(
                 "{}",
@@ -529,18 +541,4 @@ async fn handle_torrent_commands(
 
     client.shutdown().await?;
     Ok(())
-}
-
-// Helper extension for FabricNetworkConfig
-impl FabricNetworkConfig {
-    fn new_kaleido(gateway: &str, ca: &str) -> Self {
-        Self {
-            name: "Kaleido".to_string(),
-            orderers: vec![format!("{}/orderer", gateway)],
-            peers: vec![format!("{}/peer", gateway)],
-            ca_url: ca.to_string(),
-            gateway_url: gateway.to_string(),
-            tls_cert_path: None,
-        }
-    }
 }

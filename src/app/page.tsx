@@ -6,13 +6,40 @@ import KeyManagement from '@/components/KeyManagement';
 import NetworkConnection from '@/components/NetworkConnection';
 import ChannelBrowser from '@/components/ChannelBrowser';
 import TorrentManager from '@/components/TorrentManager';
+import Settings from '@/components/Settings';
 import { useAppStore } from '@/lib/store';
+import { initializeConfig, saveStateOnClose } from '@/lib/config';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<
-    'home' | 'keys' | 'network' | 'channels' | 'torrent'
+    'home' | 'keys' | 'network' | 'channels' | 'torrent' | 'settings'
   >('home');
   const { connected } = useAppStore();
+
+  // Initialize config on app startup
+  useEffect(() => {
+    const initConfig = async () => {
+      try {
+        await initializeConfig();
+      } catch (error) {
+        console.error('Failed to initialize config:', error);
+      }
+    };
+
+    initConfig();
+
+    // Setup cleanup handler for app close
+    const handleBeforeUnload = async () => {
+      try {
+        await saveStateOnClose();
+      } catch (error) {
+        console.error('Failed to save state on close:', error);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white">
@@ -78,6 +105,16 @@ export default function Home() {
                   </button>
                 </>
               )}
+              <button
+                onClick={() => setCurrentView('settings')}
+                className={`px-4 py-2 rounded transition-colors ${
+                  currentView === 'settings'
+                    ? 'bg-cyan-600 text-white'
+                    : 'bg-slate-700 hover:bg-slate-600'
+                }`}
+              >
+                Settings
+              </button>
             </nav>
           </div>
         </div>
@@ -125,6 +162,7 @@ export default function Home() {
           <ChannelBrowser />
         )}
         {currentView === 'torrent' && <TorrentManager />}
+        {currentView === 'settings' && <Settings />}
       </main>
     </div>
   );
