@@ -11,10 +11,34 @@
  * Usage: node scripts/deploy-to-kaleido.js [--dry-run]
  */
 
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
-require('dotenv').config({ path: '.env.local' });
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import http from 'http';
+import { fileURLToPath } from 'url';
+
+// Get __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env.local manually
+function loadEnv() {
+  const envPath = path.join(__dirname, '../.env.local');
+  if (!fs.existsSync(envPath)) {
+    console.error('❌ .env.local not found at', envPath);
+    process.exit(1);
+  }
+  
+  const content = fs.readFileSync(envPath, 'utf-8');
+  content.split('\n').forEach(line => {
+    const [key, value] = line.split('=');
+    if (key && value) {
+      process.env[key.trim()] = value.trim().replace(/^["']|["']$/g, '');
+    }
+  });
+}
+
+loadEnv();
 
 // Configuration from environment variables
 const config = {
@@ -43,7 +67,7 @@ function httpRequest(method, url, data = null, auth = null) {
       options.headers['Authorization'] = `Bearer ${auth}`;
     }
 
-    const protocol = urlObj.protocol === 'https:' ? https : require('http');
+    const protocol = urlObj.protocol === 'https:' ? https : http;
     const req = protocol.request(url, options, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -238,8 +262,4 @@ async function deploy() {
 }
 
 // Run deployment
-if (require.main === module) {
-  deploy();
-}
-
-module.exports = { deploy, httpRequest, config };
+deploy();
