@@ -21,7 +21,11 @@ describe('Chaincode Integration - Movie Channel E2E', () => {
       release_year: 2010,
       genres: ['Science Fiction', 'Thriller'],
       description: 'A skilled thief who steals corporate secrets through dream-sharing technology',
-      torrent_hashes: { primary: 'Qm1234567890' },
+      torrent_hashes: { 
+        'default': 'Qm1234567890',  // Full HD version
+        '720p': 'Qm1111111111',     // HD variant
+        '480p': 'Qm2222222222'      // SD variant
+      },
       average_rating: 8.8,
       doc_type: 'Movie'
     },
@@ -32,7 +36,10 @@ describe('Chaincode Integration - Movie Channel E2E', () => {
       release_year: 2008,
       genres: ['Crime', 'Drama', 'Action'],
       description: 'When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest tests',
-      torrent_hashes: { primary: 'Qm0987654321' },
+      torrent_hashes: { 
+        'default': 'Qm0987654321',  // Full HD version
+        'bluray': 'Qm3333333333'    // Alternate bluray version
+      },
       average_rating: 9.0,
       doc_type: 'Movie'
     }
@@ -159,7 +166,7 @@ describe('Chaincode Integration - Movie Channel E2E', () => {
         expect(mockMovies[0]).to.have.property('release_year', 2010);
         expect(mockMovies[0]).to.have.property('genres');
         expect(mockMovies[0]).to.have.property('torrent_hashes');
-        expect(mockMovies[0].torrent_hashes).to.have.property('primary', 'Qm1234567890');
+        expect(mockMovies[0].torrent_hashes).to.have.property('default', 'Qm1234567890');
         expect(mockMovies[0]).to.have.property('average_rating', 8.8);
       });
     });
@@ -194,7 +201,7 @@ describe('Chaincode Integration - Movie Channel E2E', () => {
     it('should have valid torrent hashes in mock data', () => {
       cy.window().then(() => {
         mockMovies.forEach(movie => {
-          expect(movie.torrent_hashes.primary).to.match(/^Qm[A-Za-z0-9]+$/);
+          expect(movie.torrent_hashes['default']).to.match(/^Qm[A-Za-z0-9]+$/);
         });
       });
     });

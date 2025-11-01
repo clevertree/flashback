@@ -34,8 +34,10 @@ type ContentRequest struct {
 	SubmitterID string `json:"submitter_id"` // User identity that submitted
 	Notes       string `json:"notes"`        // User's reason/notes for submission
 
-	// Content distribution - supports multiple torrent sources
-	TorrentHashes map[string]string `json:"torrent_hashes"` // Key-value map of torrent sources
+	// Content distribution - supports multiple torrent sources/formats
+	// Keys: "default" (primary source), or quality variants like "720p", "480p", "bluray", etc.
+	// Example: {"default": "Qm...", "720p": "Qm...", "480p": "Qm...", "bluray": "Qm..."}
+	TorrentHashes map[string]string `json:"torrent_hashes"`
 
 	// Status tracking
 	Status          RequestStatus `json:"status"`           // Current status in workflow
@@ -64,8 +66,9 @@ type Movie struct {
 	Description string   `json:"description"`
 
 	// Content details - TorrentHashes supports multiple sources/formats
-	// Example: {"primary": "Qm...", "backup": "Qm...", "magnet": "magnet:?..."}
-	TorrentHashes map[string]string `json:"torrent_hashes"` // Key-value map of torrent sources
+	// Keys: "default" (primary/full quality), or variants like "720p", "480p", "bluray" (alternate versions)
+	// Example: {"default": "Qm...", "720p": "Qm...", "480p": "Qm...", "bluray": "Qm..."}
+	TorrentHashes map[string]string `json:"torrent_hashes"` // Key-value map of torrent sources/variants
 	FileSize      int64             `json:"file_size"`      // File size in bytes
 	Duration      int               `json:"duration"`       // Duration in minutes (0 for metadata-only)
 
