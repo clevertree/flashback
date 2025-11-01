@@ -19,7 +19,7 @@ const (
 // Secondary Keys: request_id (unique per submission), submitter_id (for user history)
 type ContentRequest struct {
 	// Unique identifiers
-	IMDBID    string `json:"imdb_id"`    // Primary key: IMDb identifier (e.g., "tt1375666")
+	IMDB      string `json:"imdb_id"`    // Primary key: IMDb identifier (e.g., "tt1375666")
 	RequestID string `json:"request_id"` // UUID: unique per request instance
 	DocType   string `json:"doc_type"`   // For CouchDB queries: "ContentRequest"
 
@@ -34,8 +34,8 @@ type ContentRequest struct {
 	SubmitterID string `json:"submitter_id"` // User identity that submitted
 	Notes       string `json:"notes"`        // User's reason/notes for submission
 
-	// Content distribution
-	TorrentHash string `json:"torrent_hash"` // WebTorrent hash (optional, for distributed download)
+	// Content distribution - supports multiple torrent sources
+	TorrentHashes map[string]string `json:"torrent_hashes"` // Key-value map of torrent sources
 
 	// Status tracking
 	Status          RequestStatus `json:"status"`           // Current status in workflow
@@ -52,7 +52,7 @@ type ContentRequest struct {
 // Primary Key: imdb_id (globally unique, same as ContentRequest)
 type Movie struct {
 	// Unique identifiers
-	IMDBID  string `json:"imdb_id"`  // Primary key: IMDb identifier
+	IMDB    string `json:"imdb_id"`  // Primary key: IMDb identifier
 	MovieID string `json:"movie_id"` // UUID: unique movie instance ID
 	DocType string `json:"doc_type"` // For CouchDB queries: "Movie"
 
@@ -63,10 +63,11 @@ type Movie struct {
 	Genres      []string `json:"genres"`
 	Description string   `json:"description"`
 
-	// Content details
-	TorrentHash string `json:"torrent_hash"` // WebTorrent hash for distributed download
-	FileSize    int64  `json:"file_size"`    // File size in bytes
-	Duration    int    `json:"duration"`     // Duration in minutes (0 for metadata-only)
+	// Content details - TorrentHashes supports multiple sources/formats
+	// Example: {"primary": "Qm...", "backup": "Qm...", "magnet": "magnet:?..."}
+	TorrentHashes map[string]string `json:"torrent_hashes"` // Key-value map of torrent sources
+	FileSize      int64             `json:"file_size"`      // File size in bytes
+	Duration      int               `json:"duration"`       // Duration in minutes (0 for metadata-only)
 
 	// Approval tracking
 	ApprovedBy  string `json:"approved_by"`  // Moderator identity that approved
@@ -80,8 +81,6 @@ type Movie struct {
 	Version   int64  `json:"version"`    // State version for optimistic locking
 
 	// Statistics
-	Views         int64   `json:"views"`          // Number of views
-	Downloads     int64   `json:"downloads"`      // Number of downloads
 	Ratings       []int   `json:"ratings"`        // Individual 1-5 star ratings
 	AverageRating float64 `json:"average_rating"` // Computed average
 }
@@ -111,7 +110,7 @@ type SearchFilter struct {
 type TransactionEvent struct {
 	EventType string `json:"event_type"` // "ContentRequested", "ContentApproved", "ContentRejected"
 	DocType   string `json:"doc_type"`   // "Movie" or "ContentRequest"
-	IMDBID    string `json:"imdb_id"`
+	IMDB      string `json:"imdb_id"`
 	RequestID string `json:"request_id"`
 	Actor     string `json:"actor"`     // User/Moderator performing action
 	Timestamp string `json:"timestamp"` // RFC3339 timestamp
@@ -170,21 +169,25 @@ func NewContentRequest(
 	description, submitterID, notes, torrentHash string,
 ) *ContentRequest {
 	now := time.Now().UTC().Format(time.RFC3339)
+	torrentHashes := make(map[string]string)
+	if torrentHash != "" {
+		torrentHashes["primary"] = torrentHash
+	}
 	return &ContentRequest{
-		IMDBID:      imdbID,
-		RequestID:   generateUUID(),
-		DocType:     "ContentRequest",
-		Title:       title,
-		Director:    director,
+		IMDB:      imdbID,
+		RequestID: generateUUID(),
+		DocType:   "ContentRequest",
+		Title:     title,
+		Director:  director,
 		ReleaseYear: releaseYear,
-		Genres:      genres,
+		Genres:    genres,
 		Description: description,
 		SubmitterID: submitterID,
-		Notes:       notes,
-		TorrentHash: torrentHash,
-		Status:      StatusPendingReview,
+		Notes:     notes,
+		TorrentHashes: torrentHashes,
+		Status:    StatusPendingReview,
 		SubmittedAt: now,
-		Version:     1,
+		Version:   1,
 	}
 }
 
@@ -192,24 +195,23 @@ func NewContentRequest(
 func NewMovieFromRequest(req *ContentRequest, approvedBy string) *Movie {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return &Movie{
-		IMDBID:        req.IMDBID,
-		MovieID:       generateUUID(),
-		DocType:       "Movie",
-		Title:         req.Title,
-		Director:      req.Director,
-		ReleaseYear:   req.ReleaseYear,
-		Genres:        req.Genres,
-		Description:   req.Description,
-		ApprovedBy:    approvedBy,
-		ApprovedAt:    now,
-		RequestID:     req.RequestID,
-		SubmitterID:   req.SubmitterID,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		Version:       1,
-		Views:         0,
-		Downloads:     0,
-		Ratings:       []int{},
+		IMDB:        req.IMDB,
+		MovieID:     generateUUID(),
+		DocType:     "Movie",
+		Title:       req.Title,
+		Director:    req.Director,
+		ReleaseYear: req.ReleaseYear,
+		Genres:      req.Genres,
+		Description: req.Description,
+		TorrentHashes: req.TorrentHashes,
+		ApprovedBy:  approvedBy,
+		ApprovedAt:  now,
+		RequestID:   req.RequestID,
+		SubmitterID: req.SubmitterID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Version:     1,
+		Ratings:     []int{},
 		AverageRating: 0.0,
 	}
 }

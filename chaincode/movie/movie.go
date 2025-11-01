@@ -96,7 +96,7 @@ func (mc *MovieContract) SubmitContentRequest(
 	}
 
 	// Check for duplicate IMDb ID
-	existingRequest, err := mc.getContentRequestByIMDBID(ctx, imdbID)
+	existingRequest, err := mc.getContentRequestByIMDB(ctx, imdbID)
 	if err != nil && err.Error() != "ContentRequest not found" {
 		return NewErrorResponse(
 			fmt.Sprintf("Error checking for duplicate: %s", err.Error()),
@@ -127,21 +127,26 @@ func (mc *MovieContract) SubmitContentRequest(
 	now := time.Now().UTC().Format(time.RFC3339)
 	requestID := uuid.New().String()
 
+	torrentHashes := make(map[string]string)
+	if torrentHash != "" {
+		torrentHashes["primary"] = torrentHash
+	}
+
 	contentRequest := &ContentRequest{
-		IMDBID:      imdbID,
-		RequestID:   requestID,
-		DocType:     "ContentRequest",
-		Title:       title,
-		Director:    director,
-		ReleaseYear: releaseYear,
-		Genres:      genres,
-		Description: description,
-		SubmitterID: submitterID,
-		Notes:       notes,
-		TorrentHash: torrentHash,
-		Status:      StatusPendingReview,
-		SubmittedAt: now,
-		Version:     1,
+		IMDB:          imdbID,
+		RequestID:     requestID,
+		DocType:       "ContentRequest",
+		Title:         title,
+		Director:      director,
+		ReleaseYear:   releaseYear,
+		Genres:        genres,
+		Description:   description,
+		SubmitterID:   submitterID,
+		Notes:         notes,
+		TorrentHashes: torrentHashes,
+		Status:        StatusPendingReview,
+		SubmittedAt:   now,
+		Version:       1,
 	}
 
 	// Save to ledger
@@ -190,7 +195,7 @@ func (mc *MovieContract) ApproveContentRequest(
 	log.Printf("[%s] ApproveContentRequest: IMDB ID=%s, Moderator=%s\n", txnID, imdbID, moderatorID)
 
 	// Get existing content request
-	contentRequest, err := mc.getContentRequestByIMDBID(ctx, imdbID)
+	contentRequest, err := mc.getContentRequestByIMDB(ctx, imdbID)
 	if err != nil {
 		return NewErrorResponse(
 			fmt.Sprintf("ContentRequest not found for IMDB ID: %s", imdbID),
@@ -229,7 +234,7 @@ func (mc *MovieContract) ApproveContentRequest(
 	// Create movie entry
 	movieID := uuid.New().String()
 	movie := &Movie{
-		IMDBID:        imdbID,
+		IMDB:          imdbID,
 		MovieID:       movieID,
 		DocType:       "Movie",
 		Title:         contentRequest.Title,
@@ -244,8 +249,7 @@ func (mc *MovieContract) ApproveContentRequest(
 		CreatedAt:     now,
 		UpdatedAt:     now,
 		Version:       1,
-		Views:         0,
-		Downloads:     0,
+		TorrentHashes: contentRequest.TorrentHashes,
 		Ratings:       []int{},
 		AverageRating: 0.0,
 	}
@@ -294,7 +298,7 @@ func (mc *MovieContract) RejectContentRequest(
 	log.Printf("[%s] RejectContentRequest: IMDB ID=%s\n", txnID, imdbID)
 
 	// Get existing content request
-	contentRequest, err := mc.getContentRequestByIMDBID(ctx, imdbID)
+	contentRequest, err := mc.getContentRequestByIMDB(ctx, imdbID)
 	if err != nil {
 		return NewErrorResponse(
 			fmt.Sprintf("ContentRequest not found for IMDB ID: %s", imdbID),
@@ -486,15 +490,15 @@ func (mc *MovieContract) GetRequestHistory(
 	return history, nil
 }
 
-// GetMovieByIMDBID retrieves a specific movie by IMDb ID
+// GetMovieByIMDB retrieves a specific movie by IMDb ID
 // Args: [imdbID]
 // Returns: Movie or error if not found
-func (mc *MovieContract) GetMovieByIMDBID(
+func (mc *MovieContract) GetMovieByIMDB(
 	ctx contractapi.TransactionContextInterface,
 	imdbID string,
 ) (*Movie, error) {
 	txnID := ctx.GetStub().GetTxID()
-	log.Printf("[%s] GetMovieByIMDBID: %s\n", txnID, imdbID)
+	log.Printf("[%s] GetMovieByIMDB: %s\n", txnID, imdbID)
 
 	movieBytes, err := ctx.GetStub().GetState(buildMovieKey(imdbID))
 	if err != nil {
@@ -518,7 +522,7 @@ func (mc *MovieContract) GetMovieByIMDBID(
 // HELPER FUNCTIONS
 // ============================================================================
 
-func (mc *MovieContract) getContentRequestByIMDBID(
+func (mc *MovieContract) getContentRequestByIMDB(
 	ctx contractapi.TransactionContextInterface,
 	imdbID string,
 ) (*ContentRequest, error) {
