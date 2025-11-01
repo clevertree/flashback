@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Git Pre-Commit Hook
-# Runs Next.js and Cargo builds to ensure no broken commits
-# This hook prevents committing code that doesn't build
+# Runs unit tests and builds to ensure no broken commits
+# This hook prevents committing code that doesn't build or pass tests
 
 set -e
 
@@ -14,7 +14,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}  Pre-Commit Build Verification${NC}"
+echo -e "${BLUE}  Pre-Commit Verification${NC}"
+echo -e "${BLUE}  Tests + Builds${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
@@ -22,11 +23,27 @@ echo ""
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "$PROJECT_ROOT"
 
-# Track if any build failed
-BUILD_FAILED=0
+# Track if any check failed
+VERIFICATION_FAILED=0
 
-# Step 1: Run Next.js Build
-echo -e "${YELLOW}[1/2]${NC} Building Next.js application..."
+# Step 1: Run Unit Tests (Jest)
+echo -e "${YELLOW}[1/4]${NC} Running unit tests..."
+echo ""
+
+if npm run test -- --passWithNoTests > /tmp/jest-tests.log 2>&1; then
+    echo -e "${GREEN}✓${NC} Unit tests passed"
+    echo ""
+else
+    echo -e "${RED}✗${NC} Unit tests failed!"
+    echo ""
+    echo -e "${YELLOW}Test Output:${NC}"
+    cat /tmp/jest-tests.log | tail -50
+    echo ""
+    VERIFICATION_FAILED=1
+fi
+
+# Step 2: Run Next.js Build
+echo -e "${YELLOW}[2/4]${NC} Building Next.js application..."
 echo ""
 
 if npm run build > /tmp/nextjs-build.log 2>&1; then
@@ -38,11 +55,11 @@ else
     echo -e "${YELLOW}Build Output:${NC}"
     cat /tmp/nextjs-build.log | tail -30
     echo ""
-    BUILD_FAILED=1
+    VERIFICATION_FAILED=1
 fi
 
-# Step 2: Run Cargo Build
-echo -e "${YELLOW}[2/2]${NC} Building Rust project..."
+# Step 3: Run Cargo Build
+echo -e "${YELLOW}[3/4]${NC} Building Rust project..."
 echo ""
 
 if npm run tauri:build > /tmp/cargo-build.log 2>&1; then
@@ -54,20 +71,37 @@ else
     echo -e "${YELLOW}Build Output:${NC}"
     tail -50 /tmp/cargo-build.log
     echo ""
-    BUILD_FAILED=1
+    VERIFICATION_FAILED=1
+fi
+
+# Step 4: Run Cargo Tests
+echo -e "${YELLOW}[4/4]${NC} Running Cargo tests..."
+echo ""
+
+if cargo test --lib > /tmp/cargo-tests.log 2>&1; then
+    echo -e "${GREEN}✓${NC} Cargo tests passed"
+    echo ""
+else
+    echo -e "${RED}✗${NC} Cargo tests failed!"
+    echo ""
+    echo -e "${YELLOW}Test Output (last 50 lines):${NC}"
+    tail -50 /tmp/cargo-tests.log
+    echo ""
+    VERIFICATION_FAILED=1
 fi
 
 # Summary
 echo -e "${BLUE}========================================${NC}"
 
-if [ $BUILD_FAILED -eq 0 ]; then
-    echo -e "${GREEN}✓ All builds passed!${NC}"
+if [ $VERIFICATION_FAILED -eq 0 ]; then
+    echo -e "${GREEN}✓ All tests passed!${NC}"
+    echo -e "${GREEN}✓ All builds successful!${NC}"
     echo -e "${GREEN}✓ Commit allowed${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     exit 0
 else
-    echo -e "${RED}✗ Build verification failed!${NC}"
+    echo -e "${RED}✗ Verification failed!${NC}"
     echo -e "${RED}✗ Commit rejected${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""

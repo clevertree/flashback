@@ -19,12 +19,39 @@ The pre-commit hook will run before each commit:
 git commit -m "your message"
   ↓
 [Pre-commit hook runs]
+  ├─ Runs Jest unit tests (React components)
   ├─ Builds Next.js app
-  └─ Builds Rust/Tauri project
+  ├─ Builds Rust/Tauri project
+  └─ Runs Cargo tests (Rust library)
   ↓
-If both succeed → Commit allowed ✓
-If either fails → Commit rejected ✗
+If all pass → Commit allowed ✓
+If any fail → Commit rejected ✗
 ```
+
+## What Gets Checked
+
+### Unit Tests (Jest)
+- React component tests from `src/__tests__/`
+- Must pass before commit allowed
+- Run with: `npm run test`
+
+### Next.js Build
+- Compiles React/TypeScript code
+- Optimizes static content
+- Must succeed before commit allowed
+- Run with: `npm run build`
+
+### Rust Build (Cargo)
+- Compiles all Rust crates (fabric-core, fabric-cli, src-tauri)
+- Links dependencies
+- Must succeed before commit allowed
+- Run with: `npm run tauri:build`
+
+### Cargo Tests
+- Unit tests for Rust code
+- Tests in `crates/fabric-core/src/`
+- Must pass before commit allowed
+- Run with: `cargo test --lib`
 
 ## Verify Installation
 
