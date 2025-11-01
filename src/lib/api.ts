@@ -1,7 +1,27 @@
 import { invoke } from '@tauri-apps/api/tauri';
+import {
+  loadKaleidoConfig,
+  getGatewayUrl,
+  getCaUrl,
+  getAuthCredentials,
+  getOrganizationMspId,
+} from './kaleido-config';
 
+/**
+ * Get Kaleido configuration
+ */
+export function getKaleidoConfig() {
+  return loadKaleidoConfig();
+}
+
+/**
+ * Generate a keypair with organization context from Kaleido config
+ */
 export async function generateKeypair() {
-  return invoke('generate_keypair');
+  const config = getKaleidoConfig();
+  return invoke('generate_keypair', {
+    org_name: config.organization,
+  });
 }
 
 export async function loadIdentity(path: string) {
@@ -12,15 +32,26 @@ export async function saveIdentity(path: string, identity: any) {
   return invoke('save_identity', { path, identity });
 }
 
+/**
+ * Connect to Kaleido network with provided or default configuration
+ */
 export async function connectNetwork(
-  gateway: string,
-  caUrl: string,
-  identity: any
+  gateway?: string,
+  caUrl?: string,
+  identity?: any
 ) {
+  const config = getKaleidoConfig();
+  const credentials = getAuthCredentials();
+
   return invoke('connect_network', {
-    gateway,
-    ca_url: caUrl,
+    gateway: gateway || getGatewayUrl(),
+    ca_url: caUrl || getCaUrl(),
     identity_json: identity,
+    app_id: credentials.username,
+    app_password: credentials.password,
+    channel_name: config.channelName,
+    organization: config.organization,
+    connection_timeout_ms: config.connectionTimeoutMs,
   });
 }
 

@@ -1,27 +1,48 @@
 'use client';
 
-import React, { useState } from 'react';
-import { connectNetwork } from '@/lib/api';
+import React, { useState, useEffect } from 'react';
+import { connectNetwork, getKaleidoConfig } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
 import { Network } from 'lucide-react';
 
 export default function NetworkConnection() {
-  const [gateway, setGateway] = useState(
-    'https://api.kaleido.io'
-  );
-  const [caUrl, setCaUrl] = useState('https://ca.kaleido.io');
+  const [gateway, setGateway] = useState('');
+  const [caUrl, setCaUrl] = useState('');
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { connected, setConnected } = useAppStore();
+
+  // Load Kaleido config on mount
+  useEffect(() => {
+    try {
+      const config = getKaleidoConfig();
+      const gatewayUrl = `https://${config.peerRestGateway}`;
+      const caEndpoint = config.caEndpoint !== 'TBD' 
+        ? `https://${config.caEndpoint}`
+        : gatewayUrl;
+      
+      setGateway(gatewayUrl);
+      setCaUrl(caEndpoint);
+      setConfigLoaded(true);
+    } catch (err) {
+      console.error('Failed to load Kaleido config:', err);
+      // Fallback to defaults
+      setGateway('https://api.kaleido.io');
+      setCaUrl('https://ca.kaleido.io');
+      setConfigLoaded(true);
+    }
+  }, []);
 
   const handleConnect = async () => {
     setLoading(true);
     setError(null);
     try {
+      const config = getKaleidoConfig();
       const mockIdentity = {
         user_id: 'user1',
-        org_name: 'Org1',
-        mspid: 'Org1MSP',
+        org_name: config.organization,
+        mspid: config.organization,
         certificate: 'cert',
         private_key: 'key',
         public_key: 'pub',
@@ -33,7 +54,7 @@ export default function NetworkConnection() {
         mockIdentity
       );
       setConnected(true);
-      alert('Connected to network successfully!');
+      alert(`Connected to Kaleido network (${config.networkId}) successfully!`);
     } catch (err: any) {
       setError(err.message || 'Failed to connect');
     } finally {
@@ -106,6 +127,11 @@ export default function NetworkConnection() {
             <p>
               Network: {connected ? '🟢 Connected' : '🔴 Disconnected'}
             </p>
+            {configLoaded && (
+              <p className="mt-2 text-sm text-slate-300">
+                Kaleido Network: {getKaleidoConfig().networkId}
+              </p>
+            )}
           </div>
         </div>
       </div>

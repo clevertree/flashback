@@ -9,6 +9,14 @@ jest.mock('@/lib/api', () => ({
     public_key: 'test_public_key',
   }),
   saveIdentity: jest.fn().mockResolvedValue(undefined),
+  getKaleidoConfig: jest.fn().mockReturnValue({
+    organization: 'Org1MSP',
+    networkId: 'u0inmt8fjp',
+    peerId: 'u0z8yv2jc2',
+    peerRestGateway: 'u0inmt8fjp-u0z8yv2jc2-connect.us0-aws-ws.kaleido.io',
+    caEndpoint: 'TBD',
+    channelName: 'default-channel',
+  }),
 }));
 
 describe('KeyManagement Component', () => {
@@ -41,8 +49,8 @@ describe('KeyManagement Component', () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.getByText('Org1')).toBeInTheDocument();
-      expect(screen.getByText('Org1MSP')).toBeInTheDocument();
+      expect(screen.getByText(/Org:/)).toBeInTheDocument();
+      expect(screen.getByText(/MSPID:/)).toBeInTheDocument();
     });
   });
 

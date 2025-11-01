@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { generateKeypair, saveIdentity, loadIdentity } from '@/lib/api';
+import { generateKeypair, saveIdentity, loadIdentity, getKaleidoConfig } from '@/lib/api';
 import { Key, Upload } from 'lucide-react';
 
 export default function KeyManagement() {
@@ -13,11 +13,14 @@ export default function KeyManagement() {
     setLoading(true);
     setError(null);
     try {
+      const config = getKaleidoConfig();
       const result: any = await generateKeypair();
       setIdentity({
         user_id: 'user1',
-        org_name: 'Org1',
-        mspid: 'Org1MSP',
+        org_name: config.organization,
+        mspid: config.organization,
+        network_id: config.networkId,
+        peer_id: config.peerId,
         ...result,
       });
     } catch (err: any) {
@@ -79,6 +82,16 @@ export default function KeyManagement() {
                   <p>
                     <strong>MSPID:</strong> {identity.mspid}
                   </p>
+                  {identity.network_id && (
+                    <p>
+                      <strong>Kaleido Network:</strong> {identity.network_id}
+                    </p>
+                  )}
+                  {identity.peer_id && (
+                    <p>
+                      <strong>Peer ID:</strong> {identity.peer_id}
+                    </p>
+                  )}
                   <div className="mt-4">
                     <p className="mb-2 font-semibold">Private Key:</p>
                     <code className="block max-h-24 overflow-auto rounded bg-slate-800 p-2 text-xs">
