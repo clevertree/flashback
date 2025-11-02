@@ -306,7 +306,6 @@ async function deploy() {
     }
 
     // Get current state
-    const channels = await getChannels();
     const currentChaincodes = await getChaincodes();
 
     if (!dryRun) {

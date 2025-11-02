@@ -255,7 +255,9 @@ Legend:
 4. **Moderator Interface**: Not yet created
 5. **Blockchain Chaincode**: submitContentRequest not yet implemented
 
-### TODO - Next Steps
+### TODO - Next Steps (Post Deployment)
+- [ ] Deploy all 4 chaincodes via Kaleido Console
+- [ ] Verify deployment with `npm run check:kaleido`
 - [ ] Implement search functionality in Movies channel
 - [ ] Create content submission form UI
 - [ ] Implement submitContentRequest chaincode

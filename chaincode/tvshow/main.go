@@ -1,4 +1,3 @@
-package tvshow
 package main
 
 import (

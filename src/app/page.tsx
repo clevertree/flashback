@@ -6,13 +6,14 @@ import KeyManagement from '@/components/KeyManagement';
 import NetworkConnection from '@/components/NetworkConnection';
 import ChannelBrowser from '@/components/ChannelBrowser';
 import TorrentManager from '@/components/TorrentManager';
+import ModerationDashboard from '@/components/ModerationDashboard';
 import Settings from '@/components/Settings';
 import { useAppStore } from '@/lib/store';
 import { initializeConfig, saveStateOnClose } from '@/lib/config';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<
-    'home' | 'keys' | 'network' | 'channels' | 'torrent' | 'settings'
+    'home' | 'keys' | 'network' | 'channels' | 'moderation' | 'torrent' | 'settings'
   >('home');
   const { connected } = useAppStore();
 
@@ -103,6 +104,16 @@ export default function Home() {
                   >
                     Torrent
                   </button>
+                  <button
+                    onClick={() => setCurrentView('moderation')}
+                    className={`px-4 py-2 rounded transition-colors ${
+                      currentView === 'moderation'
+                        ? 'bg-cyan-600 text-white'
+                        : 'bg-slate-700 hover:bg-slate-600'
+                    }`}
+                  >
+                    Moderation
+                  </button>
                 </>
               )}
               <button
@@ -160,6 +171,9 @@ export default function Home() {
         {currentView === 'network' && <NetworkConnection />}
         {currentView === 'channels' && connected && (
           <ChannelBrowser />
+        )}
+        {currentView === 'moderation' && connected && (
+          <ModerationDashboard />
         )}
         {currentView === 'torrent' && <TorrentManager />}
         {currentView === 'settings' && <Settings />}

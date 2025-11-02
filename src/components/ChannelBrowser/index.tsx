@@ -1,16 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { getChannels, queryChaincodeAsync } from '@/lib/api';
+import { queryChaincodeAsync, invokeChaincodeAsync } from '@/lib/api';
 import { useAppStore } from '@/lib/store';
-import { Play, Tv, Gamepad2, Vote, Film, Search, RefreshCw, Star } from 'lucide-react';
+import { Film, Search, RefreshCw, Star, Plus, X } from 'lucide-react';
+import ContentSubmissionModal from '@/components/ContentSubmissionModal';
 
-interface Channel {
-  id: string;
-  name: string;
-  description: string;
-  chaincode_id: string;
-}
+// Constants for live movie chaincode
+const MOVIE_CHANNEL = 'movies-general';
+const MOVIE_CHAINCODE = 'flashback_repository';
 
 interface Movie {
   imdb_id: string;
@@ -25,42 +23,41 @@ interface Movie {
 }
 
 export default function ChannelBrowser() {
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [selectedChannel, setSelectedChannel] =
-    useState<Channel | null>(null);
   const [content, setContent] = useState<Movie[]>([]);
+  const [filteredContent, setFilteredContent] = useState<Movie[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filter states
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [yearRange, setYearRange] = useState<{ min: number; max: number }>({
+    min: 1990,
+    max: 2025,
+  });
+  const [ratingRange, setRatingRange] = useState<{ min: number; max: number }>({
+    min: 0,
+    max: 10,
+  });
+  const [selectedDirector, setSelectedDirector] = useState('');
+  
+  // Submission modal state
+  const [submissionModalOpen, setSubmissionModalOpen] = useState(false);
 
+  // Load movies on mount
   useEffect(() => {
-    loadChannels();
+    loadMovies();
   }, []);
 
-  const loadChannels = async () => {
-    setLoading(true);
-    try {
-      const result: any = await getChannels();
-      setChannels(result.channels || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load channels');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleChannelSelect = async (channel: Channel) => {
-    setSelectedChannel(channel);
-    setSearchQuery('');
-    setIsSearching(false);
+  const loadMovies = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Call QueryAll function from movie chaincode
       const result: any = await queryChaincodeAsync(
-        channel.id,
-        channel.chaincode_id,
+        MOVIE_CHANNEL,
+        MOVIE_CHAINCODE,
         'QueryAll',
         []
       );
@@ -76,23 +73,77 @@ export default function ChannelBrowser() {
       }
       
       setContent(movies);
-      if (movies.length === 0) {
-        setError(null); // Clear error if no results (expected for new channel)
-      }
+      setFilteredContent(movies);
+      console.log(`Loaded ${movies.length} movies from live chaincode`);
     } catch (err: any) {
-      setError(err.message || 'Failed to load content from chaincode');
+      setError(err.message || 'Failed to load movies from chaincode');
       setContent([]);
+      setFilteredContent([]);
+      console.error('Error loading movies:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  // Apply filters to content
+  const applyFilters = (moviesToFilter: Movie[]): Movie[] => {
+    return moviesToFilter.filter((movie) => {
+      // Genre filter
+      if (selectedGenres.length > 0 && movie.genres) {
+        const hasGenre = selectedGenres.some((genre) =>
+          movie.genres?.some(
+            (g) => g.toLowerCase() === genre.toLowerCase()
+          )
+        );
+        if (!hasGenre) return false;
+      }
+
+      // Year filter
+      if (movie.release_year) {
+        if (
+          movie.release_year < yearRange.min ||
+          movie.release_year > yearRange.max
+        ) {
+          return false;
+        }
+      }
+
+      // Rating filter
+      if (movie.average_rating !== undefined) {
+        if (
+          movie.average_rating < ratingRange.min ||
+          movie.average_rating > ratingRange.max
+        ) {
+          return false;
+        }
+      }
+
+      // Director filter
+      if (
+        selectedDirector &&
+        (!movie.director ||
+          !movie.director
+            .toLowerCase()
+            .includes(selectedDirector.toLowerCase()))
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  };
+
+  // Update filtered content when filters or content changes
+  useEffect(() => {
+    const filtered = applyFilters(content);
+    setFilteredContent(filtered);
+  }, [selectedGenres, yearRange, ratingRange, selectedDirector, content]);
+
   const handleSearch = async (query: string) => {
-    if (!selectedChannel) return;
-    
     setSearchQuery(query);
     if (!query.trim()) {
       setIsSearching(false);
+      await loadMovies();
       return;
     }
 
@@ -101,10 +152,10 @@ export default function ChannelBrowser() {
     try {
       // Call SearchByTitle function from movie chaincode
       const result: any = await queryChaincodeAsync(
-        selectedChannel.id,
-        selectedChannel.chaincode_id,
+        MOVIE_CHANNEL,
+        MOVIE_CHAINCODE,
         'SearchByTitle',
-        [query, '20'] // query and limit
+        [query, '50'] // query and limit (increased for better filtering)
       );
       
       // Handle different response formats
@@ -118,197 +169,397 @@ export default function ChannelBrowser() {
       }
       
       setContent(searchResults);
-      if (searchResults.length === 0) {
-        setError(`No results found for "${query}"`);
+      const filtered = applyFilters(searchResults);
+      setFilteredContent(filtered);
+      
+      if (filtered.length === 0) {
+        setError(
+          `No results found for "${query}"${
+            selectedGenres.length > 0 ||
+            selectedDirector ||
+            yearRange.min !== 1990 ||
+            yearRange.max !== 2025
+              ? ' with current filters'
+              : ''
+          }`
+        );
       }
     } catch (err: any) {
       setError(err.message || `Search failed for "${query}"`);
       setContent([]);
+      setFilteredContent([]);
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleRefresh = async () => {
-    if (selectedChannel) {
-      setSearchQuery('');
-      setIsSearching(false);
-      await handleChannelSelect(selectedChannel);
-    }
+    setSearchQuery('');
+    setIsSearching(false);
+    await loadMovies();
   };
 
-  const getChannelIcon = (channelId: string) => {
-    switch (channelId) {
-      case 'movies':
-        return <Film className="h-6 w-6" />;
-      case 'tv-shows':
-        return <Tv className="h-6 w-6" />;
-      case 'games':
-        return <Gamepad2 className="h-6 w-6" />;
-      case 'voting':
-        return <Vote className="h-6 w-6" />;
-      default:
-        return <Play className="h-6 w-6" />;
-    }
+  // Get unique genres from all loaded movies
+  const getAllGenres = (): string[] => {
+    const genreSet = new Set<string>();
+    content.forEach((movie) => {
+      movie.genres?.forEach((genre) => genreSet.add(genre));
+    });
+    return Array.from(genreSet).sort();
+  };
+
+  // Get unique directors from all loaded movies
+  const getAllDirectors = (): string[] => {
+    const directorSet = new Set<string>();
+    content.forEach((movie) => {
+      if (movie.director) directorSet.add(movie.director);
+    });
+    return Array.from(directorSet).sort();
   };
 
   return (
     <div className="grid grid-cols-3 gap-6">
-      {/* Channel List */}
+      {/* Sidebar */}
       <div className="rounded-lg bg-slate-800 p-6">
-        <h3 className="mb-4 text-xl font-bold">Channels</h3>
-        <div className="space-y-2">
-          {loading && channels.length === 0 ? (
-            <p className="text-slate-400">Loading channels...</p>
-          ) : (
-            channels.map((channel) => (
-              <button
-                key={channel.id}
-                onClick={() => handleChannelSelect(channel)}
-                className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 transition-colors ${
-                  selectedChannel?.id === channel.id
-                    ? 'bg-cyan-600'
-                    : 'bg-slate-700 hover:bg-slate-600'
-                }`}
-              >
-                <div className="text-cyan-400">
-                  {getChannelIcon(channel.id)}
-                </div>
-                <div className="text-left">
-                  <p className="font-semibold">{channel.name}</p>
-                  <p className="text-xs text-slate-300">
-                    {channel.description}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-
-        {error && (
-          <div className="mt-4 rounded-lg bg-red-900 p-4 text-sm text-red-200">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Channel Browser - Large Content Area */}
-      <div className="col-span-2 rounded-lg bg-slate-800 p-6">
-        {selectedChannel ? (
-          <div>
-            <div className="mb-6">
-              <h3 className="mb-2 text-2xl font-bold">
-                {selectedChannel.name}
-              </h3>
-              <p className="mb-4 text-slate-300">
-                {selectedChannel.description}
+        <h3 className="mb-4 text-xl font-bold">Channel & Filters</h3>
+        <div className="space-y-4">
+          {/* Channel Info */}
+          <div className="flex items-center gap-3 rounded-lg bg-slate-700 px-4 py-3">
+            <Film className="h-6 w-6 text-cyan-500" />
+            <div className="flex-1">
+              <p className="font-semibold">Movies</p>
+              <p className="text-sm text-slate-400">
+                {MOVIE_CHANNEL}
               </p>
+            </div>
+          </div>
+          
+          <div className="rounded-lg bg-slate-900 p-3">
+            <p className="text-sm text-slate-400">
+              <strong>Loaded:</strong> {content.length} movies
+            </p>
+            <p className="mt-1 text-sm text-slate-400">
+              <strong>Shown:</strong> {filteredContent.length}
+              {selectedGenres.length > 0 ||
+              selectedDirector ||
+              yearRange.min !== 1990 ||
+              yearRange.max !== 2025
+                ? ' (filtered)'
+                : ''}
+            </p>
+            {isSearching && (
+              <p className="mt-1 text-sm text-cyan-400">Searching...</p>
+            )}
+          </div>
 
-              {/* Search Bar */}
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-3 h-5 w-5 text-slate-400" />
+          {/* Filter Toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="w-full rounded-lg bg-slate-700 px-4 py-2 font-semibold transition-colors hover:bg-slate-600"
+          >
+            {showFilters ? '▼ Hide Filters' : '▶ Show Filters'}
+          </button>
+
+          {/* Filters Panel */}
+          {showFilters && (
+            <div className="space-y-4 rounded-lg border border-slate-600 bg-slate-900 p-4">
+              {/* Genre Filter */}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-300">
+                  Genres
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {getAllGenres().slice(0, 8).map((genre) => (
+                    <button
+                      key={genre}
+                      onClick={() => {
+                        setSelectedGenres((prev) =>
+                          prev.includes(genre)
+                            ? prev.filter((g) => g !== genre)
+                            : [...prev, genre]
+                        );
+                      }}
+                      className={`rounded px-2 py-1 text-xs transition-colors ${
+                        selectedGenres.includes(genre)
+                          ? 'bg-cyan-600 text-white'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {genre}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Year Filter */}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-300">
+                  Year: {yearRange.min} - {yearRange.max}
+                </p>
+                <div className="space-y-2">
                   <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    placeholder="Search movies by title..."
-                    className="w-full rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-white placeholder-slate-400 focus:border-cyan-400 focus:outline-none"
-                    disabled={loading || isSearching}
+                    type="range"
+                    min="1900"
+                    max="2025"
+                    value={yearRange.min}
+                    onChange={(e) =>
+                      setYearRange((prev) => ({
+                        ...prev,
+                        min: Math.min(
+                          parseInt(e.target.value),
+                          prev.max
+                        ),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <input
+                    type="range"
+                    min="1900"
+                    max="2025"
+                    value={yearRange.max}
+                    onChange={(e) =>
+                      setYearRange((prev) => ({
+                        ...prev,
+                        max: Math.max(
+                          parseInt(e.target.value),
+                          prev.min
+                        ),
+                      }))
+                    }
+                    className="w-full"
                   />
                 </div>
-                <button
-                  onClick={handleRefresh}
-                  disabled={loading || isSearching}
-                  className="rounded-lg bg-slate-700 px-4 py-2 hover:bg-slate-600 disabled:opacity-50"
-                  title="Refresh content"
-                >
-                  <RefreshCw className="h-5 w-5" />
-                </button>
               </div>
-            </div>
 
-            {loading || isSearching ? (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-slate-400">
-                  {isSearching ? 'Searching...' : 'Loading content from chaincode...'}
+              {/* Rating Filter */}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-300">
+                  Rating: {ratingRange.min.toFixed(1)} -{' '}
+                  {ratingRange.max.toFixed(1)}
                 </p>
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    value={ratingRange.min}
+                    onChange={(e) =>
+                      setRatingRange((prev) => ({
+                        ...prev,
+                        min: Math.min(
+                          parseFloat(e.target.value),
+                          prev.max
+                        ),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    value={ratingRange.max}
+                    onChange={(e) =>
+                      setRatingRange((prev) => ({
+                        ...prev,
+                        max: Math.max(
+                          parseFloat(e.target.value),
+                          prev.min
+                        ),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                </div>
               </div>
-            ) : content.length > 0 ? (
-              <div className="grid grid-cols-2 gap-4">
-                {content.map((movie: Movie) => (
-                  <div
-                    key={movie.imdb_id}
-                    className="overflow-hidden rounded-lg bg-slate-700 transition-transform hover:scale-105"
-                  >
-                    <div className="mb-3 h-40 rounded bg-gradient-to-br from-cyan-600 to-slate-600 flex items-center justify-center">
-                      <Film className="h-12 w-12 text-slate-300 opacity-50" />
-                    </div>
-                    <div className="p-4">
-                      <h4 className="mb-1 font-semibold leading-tight">
-                        {movie.title}
-                      </h4>
-                      <p className="mb-2 text-xs text-slate-400">
-                        {movie.director && `Dir: ${movie.director}`}
-                        {movie.release_year && ` • ${movie.release_year}`}
-                      </p>
-                      {movie.genres && movie.genres.length > 0 && (
-                        <div className="mb-2 flex flex-wrap gap-1">
-                          {movie.genres.slice(0, 2).map((genre) => (
-                            <span
-                              key={genre}
-                              className="inline-block rounded bg-cyan-900 px-2 py-1 text-xs text-cyan-200"
-                            >
-                              {genre}
-                            </span>
-                          ))}
+
+              {/* Director Filter */}
+              <div>
+                <p className="mb-2 text-sm font-semibold text-slate-300">
+                  Director
+                </p>
+                <select
+                  value={selectedDirector}
+                  onChange={(e) => setSelectedDirector(e.target.value)}
+                  className="w-full rounded bg-slate-700 px-3 py-2 text-sm text-white"
+                >
+                  <option value="">All Directors</option>
+                  {getAllDirectors().slice(0, 30).map((director) => (
+                    <option key={director} value={director}>
+                      {director}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Reset Filters */}
+              <button
+                onClick={() => {
+                  setSelectedGenres([]);
+                  setYearRange({ min: 1990, max: 2025 });
+                  setRatingRange({ min: 0, max: 10 });
+                  setSelectedDirector('');
+                }}
+                className="w-full rounded-lg bg-orange-900 px-3 py-2 text-sm font-semibold transition-colors hover:bg-orange-800"
+              >
+                Reset Filters
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={handleRefresh}
+            disabled={loading || isSearching}
+            className="w-full rounded-lg bg-cyan-600 px-4 py-2 font-semibold transition-colors hover:bg-cyan-700 disabled:bg-slate-600"
+          >
+            {loading ? 'Loading...' : 'Refresh Movies'}
+          </button>
+
+          {error && (
+            <div className="mt-2 rounded-lg bg-red-900 p-3 text-sm text-red-200">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Movie Browser - Large Content Area */}
+      <div className="col-span-2 rounded-lg bg-slate-800 p-6">
+        <div>
+          <div className="mb-6">
+            <h3 className="mb-2 text-2xl font-bold">
+              Movies
+            </h3>
+            <p className="mb-4 text-slate-300">
+              Browse and search the movie database
+            </p>
+
+            {/* Search Bar and Actions */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-3 h-5 w-5 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Search movies by title..."
+                  className="w-full rounded-lg border border-slate-600 bg-slate-700 py-2 pl-10 pr-4 text-white placeholder-slate-400 focus:border-cyan-400 focus:outline-none"
+                  disabled={loading || isSearching}
+                />
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={loading || isSearching}
+                className="rounded-lg bg-slate-700 px-4 py-2 hover:bg-slate-600 disabled:opacity-50"
+                title="Refresh content"
+              >
+                <RefreshCw className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => setSubmissionModalOpen(true)}
+                disabled={loading || isSearching}
+                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold transition-colors hover:bg-emerald-700 disabled:bg-slate-600"
+                title="Submit a missing movie"
+              >
+                <Plus className="h-5 w-5" />
+                Submit
+              </button>
+            </div>
+          </div>
+
+          {loading || isSearching ? (
+            <div className="flex items-center justify-center py-20">
+              <p className="text-slate-400">
+                {isSearching ? 'Searching...' : 'Loading content from chaincode...'}
+              </p>
+            </div>
+          ) : filteredContent.length > 0 ? (
+            <div className="grid grid-cols-2 gap-4">
+              {filteredContent.map((movie: Movie) => (
+                <div
+                  key={movie.imdb_id}
+                  className="overflow-hidden rounded-lg bg-slate-700 transition-transform hover:scale-105"
+                >
+                  <div className="mb-3 h-40 rounded bg-gradient-to-br from-cyan-600 to-slate-600 flex items-center justify-center">
+                    <Film className="h-12 w-12 text-slate-300 opacity-50" />
+                  </div>
+                  <div className="p-4">
+                    <h4 className="mb-1 font-semibold leading-tight">
+                      {movie.title}
+                    </h4>
+                    <p className="mb-2 text-xs text-slate-400">
+                      {movie.director && `Dir: ${movie.director}`}
+                      {movie.release_year && ` • ${movie.release_year}`}
+                    </p>
+                    {movie.genres && movie.genres.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-1">
+                        {movie.genres.slice(0, 2).map((genre) => (
+                          <span
+                            key={genre}
+                            className="inline-block rounded bg-cyan-900 px-2 py-1 text-xs text-cyan-200"
+                          >
+                            {genre}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="mb-2 line-clamp-2 text-sm text-slate-300">
+                      {movie.description}
+                    </p>
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span>IMDb: {movie.imdb_id}</span>
+                      {movie.average_rating && (
+                        <div className="flex items-center gap-1">
+                          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                          <span>{movie.average_rating.toFixed(1)}</span>
                         </div>
                       )}
-                      <p className="mb-2 line-clamp-2 text-sm text-slate-300">
-                        {movie.description}
-                      </p>
-                      <div className="flex items-center justify-between text-xs text-slate-400">
-                        <span>IMDb: {movie.imdb_id}</span>
-                        {movie.average_rating && (
-                          <div className="flex items-center gap-1">
-                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                            <span>{movie.average_rating.toFixed(1)}</span>
-                          </div>
-                        )}
-                      </div>
-                      {movie.torrent_hash && (
-                        <p className="mt-2 truncate rounded bg-slate-600 px-2 py-1 text-xs text-cyan-300" title={movie.torrent_hash}>
-                          Hash: {movie.torrent_hash.substring(0, 12)}...
-                        </p>
-                      )}
                     </div>
+                    {movie.torrent_hash && (
+                      <p className="mt-2 truncate rounded bg-slate-600 px-2 py-1 text-xs text-cyan-300" title={movie.torrent_hash}>
+                        Hash: {movie.torrent_hash.substring(0, 12)}...
+                      </p>
+                    )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center py-20">
-                <p className="text-slate-400">
-                  {error && searchQuery
-                    ? `No results found for "${searchQuery}"`
-                    : 'No content available in this channel'}
-                </p>
-              </div>
-            )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-20">
+              <p className="text-slate-400">
+                {filteredContent.length === 0 && content.length > 0
+                  ? 'No movies match your filters'
+                  : error && searchQuery
+                  ? `No results found for "${searchQuery}"`
+                  : 'No content available'}
+              </p>
+            </div>
+          )}
 
-            {error && !isSearching && (
-              <div className="mt-4 rounded-lg bg-red-900 p-4 text-sm text-red-200">
-                {error}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-20">
-            <p className="text-slate-400">
-              Select a channel to browse content
-            </p>
-          </div>
-        )}
+          {error && !isSearching && (
+            <div className="mt-4 rounded-lg bg-red-900 p-4 text-sm text-red-200">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Submission Modal */}
+      <ContentSubmissionModal
+        isOpen={submissionModalOpen}
+        onClose={() => setSubmissionModalOpen(false)}
+        onSuccess={() => {
+          // Refresh movies after successful submission
+          loadMovies();
+        }}
+        existingMovies={content.map((m) => ({
+          imdb_id: m.imdb_id,
+          title: m.title,
+        }))}
+      />
     </div>
   );
 }

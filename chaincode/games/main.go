@@ -1,4 +1,3 @@
-package games
 package main
 
 import (
