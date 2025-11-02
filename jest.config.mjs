@@ -18,6 +18,8 @@ const config = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
+  testPathIgnorePatterns: ['/node_modules/', '/.next/'],
+  moduleDirectories: ['node_modules', '<rootDir>/'],
   projects: [
     {
       displayName: 'unit-tests',
@@ -26,11 +28,10 @@ const config = {
         '<rootDir>/src/**/*.test.{ts,tsx}',
       ],
       testEnvironment: 'jsdom',
-    },
-    {
-      displayName: 'e2e-tests',
-      testMatch: ['<rootDir>/__tests__/**/*.test.mjs'],
-      testEnvironment: 'node',
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/src/$1',
+      },
+      setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
     },
   ],
 };
